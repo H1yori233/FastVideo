@@ -122,7 +122,7 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
             image = image.clamp(0, 1)
 
         image_inputs = self.image_processor(
-            images=image, return_tensors="pt").to(
+            images=image, return_tensors="pt", do_rescale=False).to(
                 get_local_torch_device())
 
         with set_forward_context(current_timestep=0, attn_metadata=None):
