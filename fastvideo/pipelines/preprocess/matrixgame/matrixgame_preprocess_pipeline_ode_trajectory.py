@@ -39,8 +39,8 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
 from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         InputValidationStage,
-                                        ImageEncodingStage,
                                         LatentPreparationStage,
+                                        MatrixGameImageEncodingStage,
                                         TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
@@ -76,7 +76,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=ImageEncodingStage(
+                       stage=MatrixGameImageEncodingStage(
                            image_encoder=self.get_module("image_encoder"),
                            image_processor=self.get_module("image_processor"),
                        ))
@@ -337,8 +337,8 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                 for i in range(len(valid_indices)):
                     # Collect the trajectory data
                     batch = ForwardBatch(**shallow_asdict(sampling_params), )
-                    batch.image_embeds = clip_features[i].unsqueeze(0)
-                    batch.image_latents = image_latents[i].unsqueeze(0)
+                    batch.image_embeds = [clip_features[i].unsqueeze(0)]
+                    batch.image_latent = image_latents[i].unsqueeze(0)
                     batch.keyboard_cond = (torch.from_numpy(
                         keyboard_cond[i]).unsqueeze(0) if keyboard_cond
                                            is not None else None)

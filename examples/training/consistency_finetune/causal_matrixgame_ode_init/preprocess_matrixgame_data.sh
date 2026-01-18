@@ -11,7 +11,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size 1 \
     --seed 42 \
-    --max_height 350 \
+    --max_height 352 \
     --max_width 640 \
     --num_frames 77 \
     --flow_shift 5.0 \
