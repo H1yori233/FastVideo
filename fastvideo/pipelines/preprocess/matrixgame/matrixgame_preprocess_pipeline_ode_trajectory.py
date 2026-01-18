@@ -47,10 +47,12 @@ from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 logger = init_logger(__name__)
 
 
-class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
+class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
     """ODE Trajectory preprocessing pipeline implementation."""
 
-    _required_config_modules = ["vae", "image_encoder", "image_processor"]
+    _required_config_modules = [
+        "vae", "image_encoder", "image_processor", "transformer", "scheduler"
+    ]
 
     preprocess_dataloader: StatefulDataLoader
     preprocess_loader_iter: Iterator[dict[str, Any]]
@@ -275,7 +277,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         return features
 
     def preprocess_action_and_trajectory(self, fastvideo_args: FastVideoArgs,
-                                       args):
+                                         args):
         """Preprocess data and generate trajectory information."""
 
         for batch_idx, data in enumerate(self.pbar):
@@ -315,7 +317,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
                 clip_features = extra_features['clip_feature']
                 image_latents = extra_features['first_frame_latent']
-                image_latents = image_latents[:, :, :self.training_args.num_latent_t]
+                image_latents = image_latents[:, :, :args.num_latent_t]
                 pil_image = extra_features['pil_image']
                 if "keyboard_cond" in extra_features:
                     keyboard_cond = extra_features['keyboard_cond']
@@ -337,13 +339,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch = ForwardBatch(**shallow_asdict(sampling_params), )
                     batch.image_embeds = clip_features[i].unsqueeze(0)
                     batch.image_latents = image_latents[i].unsqueeze(0)
-                    batch.keyboard_cond = 
-                        torch.from_numpy(keyboard_cond[i]).unsqueeze(0) 
-                        if keyboard_cond is not None else None
-                    batch.mouse_cond = 
-                        torch.from_numpy(mouse_cond[i]).unsqueeze(0) 
-                        if mouse_cond is not None else None
-                    
+                    batch.keyboard_cond = (torch.from_numpy(
+                        keyboard_cond[i]).unsqueeze(0) if keyboard_cond
+                                           is not None else None)
+                    batch.mouse_cond = (torch.from_numpy(
+                        mouse_cond[i]).unsqueeze(0)
+                                        if mouse_cond is not None else None)
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.
@@ -353,7 +354,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.width = args.max_width
                     batch.fps = args.train_fps
                     batch.guidance_scale = 6.0
-                    batch.do_classifier_free_guidance = True
+                    batch.do_classifier_free_guidance = False
+                    batch.prompt = ""
 
                     result_batch = self.input_validation_stage(
                         batch, fastvideo_args)
@@ -401,8 +403,10 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     clip_feature_np = clip_features[idx].cpu().numpy()
                     first_frame_latent_np = image_latents[idx].cpu().numpy()
                     pil_image_np = pil_image[idx].cpu().numpy()
-                    keyboard_cond_np = keyboard_cond[idx] if keyboard_cond is not None else None
-                    mouse_cond_np = mouse_cond[idx] if mouse_cond is not None else None
+                    keyboard_cond_np = keyboard_cond[
+                        idx] if keyboard_cond is not None else None
+                    mouse_cond_np = mouse_cond[
+                        idx] if mouse_cond is not None else None
 
                     # Get trajectory features for this sample
                     traj_latents = extra_features["trajectory_latents"][idx]
@@ -422,8 +426,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         pil_image=pil_image_np,
                         keyboard_cond=keyboard_cond_np,
                         mouse_cond=mouse_cond_np,
-                        caption=""
-                    )
+                        caption="")
                     batch_data.append(record)
 
                 if batch_data:
@@ -490,4 +493,4 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         self.preprocess_action_and_trajectory(fastvideo_args, args)
 
 
-EntryClass = PreprocessPipeline_ODE_Trajectory
+EntryClass = PreprocessPipeline_MatrixGame_ODE_Trajectory

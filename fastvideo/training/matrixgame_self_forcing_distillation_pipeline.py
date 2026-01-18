@@ -15,7 +15,8 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
+class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
+                                                ):
     """
     A self-forcing distillation pipeline for MatrixGame that uses the self-forcing methodology
     with DMD for video generation.

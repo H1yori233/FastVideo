@@ -1,0 +1,55 @@
+```
+git config --local user.name "H1yori233"
+git config --local user.email "k1kong@ucsd.edu"
+git commit -m "update"
+```
+
+```
+pre-commit run --all-files
+```
+
+### 收集 ODE pairs
+
+#### 0107_22:00
+
+很容易理解，就是收集
+
+```
+    trajectory_latents: Latents at different timesteps
+    trajectory_timesteps: Corresponding timesteps
+```
+
+```
+    noise_pred = current_model(
+        latent_model_input,
+        ...
+    )
+    ...
+    latents = self.scheduler.step(noise_pred, t,
+                latents, **extra_step_kwargs, return_dict=False)[0]
+    ...
+    trajectory_timesteps.append(t)
+    trajectory_latents.append(latents)
+```
+
+原文是 `40k` 步，这里先试试 `1k`?
+
+```
+bash examples/training/consistency_finetune/causal_matrixgame_ode_init/preprocess_matrixgame_data.sh 2>&1 | tee output_ode.log
+```
+
+
+### 在 foundation model 上替换 action module 
+
+
+### fine-tune causal student model
+
+原文是 `6k` 步
+
+
+### Self-Forcing
+
+原文是 `4k` 步
+
+The learning rate is 6e-6. The chunk
+size of latent frames and attention local size are set as 3 and 6, respectively. 
