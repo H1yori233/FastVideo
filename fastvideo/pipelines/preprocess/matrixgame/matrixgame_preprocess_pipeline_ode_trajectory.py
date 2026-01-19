@@ -133,7 +133,6 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
 
         features["clip_feature"] = clip_features
         features["pil_image"] = first_frame
-        
         """Get VAE features from the first frame of each video"""
         video_conditions = []
         for frame in first_frame:
@@ -195,7 +194,14 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
 
         # image_latent = torch.concat([mask_lat_size, latent_condition], dim=1)
 
-        features["first_frame_latent"] = latent_condition
+        # Create mask_cond: ones for first frame, zeros for rest
+        # Shape: (B, 16, latent_frames, latent_height, latent_width)
+        mask_cond = torch.ones_like(latent_condition)
+        mask_cond[:, :, 1:] = 0  # Set all frames except first to 0
+        # Create cond_concat: first 4 channels of mask + all 16 channels of img_cond
+        # Shape: (B, 20, latent_frames, latent_height, latent_width)
+        cond_concat = torch.cat([mask_cond[:, :4], latent_condition], dim=1)
+        features["first_frame_latent"] = cond_concat
 
         if "action_path" in valid_data and valid_data["action_path"]:
             keyboard_cond_list = []
@@ -334,16 +340,17 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                 trajectory_timesteps = []
                 trajectory_decoded = []
 
+                device = get_local_torch_device()
                 for i in range(len(valid_indices)):
                     # Collect the trajectory data
                     batch = ForwardBatch(**shallow_asdict(sampling_params), )
                     batch.image_embeds = [clip_features[i].unsqueeze(0)]
                     batch.image_latent = image_latents[i].unsqueeze(0)
                     batch.keyboard_cond = (torch.from_numpy(
-                        keyboard_cond[i]).unsqueeze(0) if keyboard_cond
-                                           is not None else None)
+                        keyboard_cond[i]).unsqueeze(0).to(device) if
+                                           keyboard_cond is not None else None)
                     batch.mouse_cond = (torch.from_numpy(
-                        mouse_cond[i]).unsqueeze(0)
+                        mouse_cond[i]).unsqueeze(0).to(device)
                                         if mouse_cond is not None else None)
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
@@ -353,6 +360,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                     batch.height = args.max_height
                     batch.width = args.max_width
                     batch.fps = args.train_fps
+                    batch.num_frames = valid_data["pixel_values"].shape[2]
                     batch.guidance_scale = 6.0
                     batch.do_classifier_free_guidance = False
                     batch.prompt = ""
@@ -361,6 +369,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                         batch, fastvideo_args)
                     result_batch = self.timestep_preparation_stage(
                         batch, fastvideo_args)
+                    result_batch.timesteps = result_batch.timesteps.to(device)
                     result_batch = self.latent_preparation_stage(
                         result_batch, fastvideo_args)
                     result_batch = self.denoising_stage(result_batch,
