@@ -4,9 +4,11 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+# MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
 DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
+STUDENT_ACTION_CONFIG="$(dirname "$0")/student_action_config.json"
 NUM_GPUS=1
 # IP=[MASTER NODE IP]
 
@@ -15,6 +17,7 @@ training_args=(
   --tracker_project_name "matrixgame_ode_init"
   --output_dir "matrixgame_ode_init"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
+  --override_action_config "$STUDENT_ACTION_CONFIG"
   --wandb_run_name "matrixgame_ode_init"
   --max_train_steps 6000
   --train_batch_size 1
@@ -84,7 +87,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/ode_causal_pipeline.py \
+    fastvideo/training/matrixgame_ode_causal_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

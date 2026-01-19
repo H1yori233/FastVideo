@@ -582,6 +582,12 @@ class TransformerLoader(ComponentLoader):
         dit_config = fastvideo_args.pipeline_config.dit_config
         dit_config.update_model_arch(config)
 
+        if fastvideo_args.override_action_config is not None:
+            with open(fastvideo_args.override_action_config, 'r') as f:
+                action_config = json.load(f)
+                dit_config.action_config = action_config
+                logger.info("Overriding action config to %s", action_config)
+
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
         # Find all safetensors files

@@ -177,6 +177,7 @@ class FastVideoArgs:
     override_text_encoder_quant: QuantizationMethods = None
 
     override_transformer_cls_name: str | None = None
+    override_action_config: str | None = None  # path to JSON file for action config override
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
@@ -507,6 +508,12 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
+        )
+        parser.add_argument(
+            "--override-action-config",
+            type=str,
+            default=FastVideoArgs.override_action_config,
+            help="Path to JSON file for action config override",
         )
         parser.add_argument(
             "--override-pipeline-cls-name",
