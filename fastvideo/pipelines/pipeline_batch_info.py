@@ -229,6 +229,9 @@ class TrainingBatch:
     image_latents: torch.Tensor | None = None
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
+    # matrixgame
+    keyboard_cond: torch.Tensor | None = None
+    mouse_cond: torch.Tensor | None = None
 
     # ODE trajectory supervision
     trajectory_latents: torch.Tensor | None = None

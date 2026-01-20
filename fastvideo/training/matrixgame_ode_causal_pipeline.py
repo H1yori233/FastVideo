@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.dataloader.schema import (
     pyarrow_schema_matrixgame_ode_trajectory)
 from fastvideo.distributed import get_local_torch_device
@@ -15,12 +16,13 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
-from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
-    WanCausalDMDPipeline)
-from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
+    MatrixGameCausalDMDPipeline)
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases)
+from fastvideo.utils import shallow_asdict
 
 logger = init_logger(__name__)
 
@@ -98,12 +100,13 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
         # Warm start validation with current transformer
-        self.validation_pipeline = WanCausalDMDPipeline.from_pretrained(
+        self.validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
+                "vae": self.get_module("vae"),
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
@@ -122,8 +125,10 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             batch = next(self.train_loader_iter)
 
         # Required fields from parquet (ODE trajectory schema)
-        encoder_hidden_states = batch['text_embedding']
-        encoder_attention_mask = batch['text_attention_mask']
+        clip_feature = batch['clip_feature']
+        first_frame_latent = batch['first_frame_latent']
+        keyboard_cond = batch.get('keyboard_cond', None)
+        mouse_cond = batch.get('mouse_cond', None)
         infos = batch['info_list']
 
         # Trajectory tensors may include a leading singleton batch dim per row
@@ -155,10 +160,16 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
         # Move to device
         device = get_local_torch_device()
-        training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            device, dtype=torch.bfloat16)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            device, dtype=torch.bfloat16)
+        training_batch.image_embeds = clip_feature.to(device, dtype=torch.bfloat16)
+        training_batch.image_latents = first_frame_latent.to(device, dtype=torch.bfloat16)
+        if keyboard_cond is not None and keyboard_cond.numel() > 0:
+            training_batch.keyboard_cond = keyboard_cond.to(device, dtype=torch.bfloat16)
+        else:
+            training_batch.keyboard_cond = None
+        if mouse_cond is not None and mouse_cond.numel() > 0:
+            training_batch.mouse_cond = mouse_cond.to(device, dtype=torch.bfloat16)
+        else:
+            training_batch.mouse_cond = None
         training_batch.infos = infos
 
         return training_batch, trajectory_latents.to(
@@ -190,10 +201,49 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             timestep = timestep.reshape(timestep.shape[0], -1)
             return timestep
 
+    def _prepare_dit_inputs(self,
+                            training_batch: TrainingBatch) -> TrainingBatch:
+        """Override to properly handle I2V concatenation - call parent first, then concatenate image conditioning."""
+
+        # First, call parent method to prepare noise, timesteps, etc. for video latents
+        training_batch = super()._prepare_dit_inputs(training_batch)
+
+        assert isinstance(training_batch.image_latents, torch.Tensor)
+        image_latents = training_batch.image_latents.to(
+            get_local_torch_device(), dtype=torch.bfloat16)
+
+        temporal_compression_ratio = 4
+        num_frames = (self.training_args.num_latent_t -
+                      1) * temporal_compression_ratio + 1
+        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
+        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
+                                   latent_width)
+        mask_lat_size[:, :, 1:] = 0
+
+        first_frame_mask = mask_lat_size[:, :, :1]
+        first_frame_mask = torch.repeat_interleave(
+            first_frame_mask, dim=2, repeats=temporal_compression_ratio)
+        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]],
+                                  dim=2)
+        mask_lat_size = mask_lat_size.view(batch_size, -1,
+                                           temporal_compression_ratio,
+                                           latent_height, latent_width)
+        mask_lat_size = mask_lat_size.transpose(1, 2)
+        mask_lat_size = mask_lat_size.to(
+            image_latents.device).to(dtype=torch.bfloat16)
+
+        training_batch.noisy_model_input = torch.cat(
+            [training_batch.noisy_model_input, mask_lat_size, image_latents],
+            dim=1)
+
+        return training_batch
+
     def _step_predict_next_latent(
         self, traj_latents: torch.Tensor, traj_timesteps: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        encoder_attention_mask: torch.Tensor
+        image_embeds: torch.Tensor,
+        image_latents: torch.Tensor,
+        keyboard_cond: torch.Tensor | None,
+        mouse_cond: torch.Tensor | None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str,
                                                               torch.Tensor]]:
         latent_vis_dict: dict[str, torch.Tensor] = {}
@@ -255,8 +305,11 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
         input_kwargs = {
             "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
-            "encoder_hidden_states": encoder_hidden_states,
+            "encoder_hidden_states": None,
+            "encoder_hidden_states_image": image_embeds,
             "timestep": timestep.to(device, dtype=torch.bfloat16),
+            "mouse_cond": mouse_cond,
+            "keyboard_cond": keyboard_cond,
             "return_dict": False,
         }
         # Predict noise and step the scheduler to obtain next latent
@@ -288,8 +341,10 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         for _ in range(args.gradient_accumulation_steps):
             training_batch, traj_latents, traj_timesteps = self._get_next_batch(
                 training_batch)
-            text_embeds = training_batch.encoder_hidden_states
-            text_attention_mask = training_batch.encoder_attention_mask
+            image_embeds = training_batch.image_embeds
+            image_latents = training_batch.image_latents
+            keyboard_cond = training_batch.keyboard_cond
+            mouse_cond = training_batch.mouse_cond
             assert traj_latents.shape[0] == 1
 
             # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
@@ -299,7 +354,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
             # Forward to predict next latent by stepping scheduler with predicted noise
             noise_pred, target_latent, t, latent_vis_dict = self._step_predict_next_latent(
-                traj_latents, traj_timesteps, text_embeds, text_attention_mask)
+                traj_latents, traj_timesteps, image_embeds, image_latents, keyboard_cond, mouse_cond)
 
             training_batch.latent_vis_dict.update(latent_vis_dict)
 
@@ -338,6 +393,54 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
                 grad_value = 0.0
         training_batch.grad_norm = grad_value
         return training_batch
+
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: dict[str, Any],
+                                  num_inference_steps: int) -> ForwardBatch:
+        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.height = training_args.num_height
+        sampling_param.width = training_args.num_width
+        sampling_param.image_path = validation_batch.get(
+            'image_path') or validation_batch.get('video_path')
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        assert self.seed is not None
+        sampling_param.seed = self.seed
+
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                        sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (training_args.num_latent_t -
+                      1) * temporal_compression_factor + 1
+        sampling_param.num_frames = num_frames
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            latents=None,
+            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
+        )
+        if "image" in validation_batch and validation_batch["image"] is not None:
+            batch.pil_image = validation_batch["image"]
+
+        if "keyboard_cond" in validation_batch and validation_batch[
+                "keyboard_cond"] is not None:
+            keyboard_cond = validation_batch["keyboard_cond"]
+            keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
+            keyboard_cond = keyboard_cond.unsqueeze(0)
+            batch.keyboard_cond = keyboard_cond
+
+        if "mouse_cond" in validation_batch and validation_batch[
+                "mouse_cond"] is not None:
+            mouse_cond = validation_batch["mouse_cond"]
+            mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
+            mouse_cond = mouse_cond.unsqueeze(0)
+            batch.mouse_cond = mouse_cond
+
+        return batch
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
