@@ -321,6 +321,12 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                         data["action_path"][i] for i in valid_indices
                     ]
 
+                pixel_values = valid_data["pixel_values"]
+                if pixel_values.shape[2] == 1 and args.num_frames is not None:
+                    pixel_values = pixel_values.repeat(
+                        1, 1, args.num_frames, 1, 1)
+                    valid_data["pixel_values"] = pixel_values
+
                 # Get extra features if needed
                 extra_features = self.get_extra_features(
                     valid_data, fastvideo_args)

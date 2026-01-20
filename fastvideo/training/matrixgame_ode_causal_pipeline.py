@@ -291,6 +291,15 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             index=indexes.reshape(B, 1, num_frames, 1, 1,
                                   1).expand(-1, -1, -1, num_channels, height,
                                             width).to(self.device)).squeeze(1)
+        latent_model_input = noisy_input.permute(0, 2, 1, 3, 4)
+        if image_latents is not None:
+            latent_model_input = torch.cat(
+                [
+                    latent_model_input,
+                    image_latents.to(latent_model_input.device,
+                                     latent_model_input.dtype),
+                ],
+                dim=1)
         timestep = self.dmd_denoising_steps[indexes]
         logger.info("selected timestep for rank %s: %s",
                     self.global_rank,
@@ -304,7 +313,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
                                                       4).detach().clone().cpu()
 
         input_kwargs = {
-            "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
+            "hidden_states": latent_model_input,
             "encoder_hidden_states": None,
             "encoder_hidden_states_image": image_embeds,
             "timestep": timestep.to(device, dtype=torch.bfloat16),
