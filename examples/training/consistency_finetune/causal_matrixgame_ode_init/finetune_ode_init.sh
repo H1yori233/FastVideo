@@ -6,27 +6,29 @@ export TOKENIZERS_PARALLELISM=false
 
 # MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
 MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
+DATA_DIR="footsies-action/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 STUDENT_ACTION_CONFIG="$(dirname "$0")/student_action_config.json"
-NUM_GPUS=1
+NUM_GPUS=8
+# export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "matrixgame_ode_init"
-  --output_dir "matrixgame_ode_init"
+  --output_dir "checkpoints/matrixgame_ode_init"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
   --override_action_config "$STUDENT_ACTION_CONFIG"
   --wandb_run_name "matrixgame_ode_init"
-  --max_train_steps 6000
+  # --max_train_steps 6000
+  --max_train_steps 100
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 4
   --num_latent_t 21
   --num_height 480
   --num_width 832
-  --num_frames 77
+  --num_frames 81
   --warp_denoising_step
   --enable_gradient_checkpointing_type "full"
 )
@@ -34,10 +36,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 1
+  --sp_size 2
   --tp_size 1
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim 1
+  --hsdp_replicate_dim 4
+  --hsdp_shard_dim 2
 )
 
 # Model arguments

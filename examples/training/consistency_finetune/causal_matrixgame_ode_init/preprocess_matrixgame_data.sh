@@ -2,8 +2,8 @@
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-DATA_MERGE_PATH="footsies-dataset/merge.txt"
-OUTPUT_DIR="footsies-dataset/ode-init/"
+DATA_MERGE_PATH="footsies-action/merge.txt"
+OUTPUT_DIR="footsies-action/preprocessed/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
@@ -13,7 +13,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --seed 42 \
     --max_height 352 \
     --max_width 640 \
-    --num_frames 77 \
+    --num_frames 81 \
     --flow_shift 5.0 \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \

@@ -2,7 +2,7 @@
     "data": [
         {
             "caption": "all_left",
-            "image_path": "../../../../footsies-dataset/validate/0.png",
+            "image_path": "../../../../footsies-dataset/validate/0.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -661,7 +661,7 @@
         },
         {
             "caption": "all_right",
-            "image_path": "../../../../footsies-dataset/validate/0.png",
+            "image_path": "../../../../footsies-dataset/validate/0.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -1320,7 +1320,7 @@
         },
         {
             "caption": "all_idle",
-            "image_path": "../../../../footsies-dataset/validate/0.png",
+            "image_path": "../../../../footsies-dataset/validate/0.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -1979,7 +1979,7 @@
         },
         {
             "caption": "alternating_left_idle_right",
-            "image_path": "../../../../footsies-dataset/validate/0.png",
+            "image_path": "../../../../footsies-dataset/validate/0.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -2638,7 +2638,7 @@
         },
         {
             "caption": "all_left_with_left_position",
-            "image_path": "../../../../footsies-dataset/validate/1.png",
+            "image_path": "../../../../footsies-dataset/validate/1.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -3297,7 +3297,7 @@
         },
         {
             "caption": "all_right_with_right_position",
-            "image_path": "../../../../footsies-dataset/validate/2.png",
+            "image_path": "../../../../footsies-dataset/validate/2.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -3956,7 +3956,7 @@
         },
         {
             "caption": "alternating_left_right_with_1:2 ratio",
-            "image_path": "../../../../footsies-dataset/validate/1.png",
+            "image_path": "../../../../footsies-dataset/validate/1.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,
@@ -4615,7 +4615,7 @@
         },
         {
             "caption": "alternating_left_right_with_2:1 ratio",
-            "image_path": "../../../../footsies-dataset/validate/1.png",
+            "image_path": "../../../../footsies-dataset/validate/1.jpg",
             "video_path": null,
             "num_inference_steps": 40,
             "height": 352,

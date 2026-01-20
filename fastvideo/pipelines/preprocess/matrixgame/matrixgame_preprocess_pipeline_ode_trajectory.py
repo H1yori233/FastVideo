@@ -308,10 +308,14 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                     torch.stack(
                         [data["pixel_values"][i] for i in valid_indices]),
                     "path": [data["path"][i] for i in valid_indices],
-                    "fps": [data["fps"][i] for i in valid_indices],
-                    "duration": [data["duration"][i] for i in valid_indices],
                 }
 
+                if "fps" in data:
+                    valid_data["fps"] = [data["fps"][i] for i in valid_indices]
+                if "duration" in data:
+                    valid_data["duration"] = [
+                        data["duration"][i] for i in valid_indices
+                    ]
                 if "action_path" in data:
                     valid_data["action_path"] = [
                         data["action_path"][i] for i in valid_indices
