@@ -312,11 +312,14 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3,
                                                       4).detach().clone().cpu()
 
+        latent_model_input = latent_model_input.to(device, dtype=torch.bfloat16)
+        timestep = timestep.to(device, dtype=torch.bfloat16)
+
         input_kwargs = {
             "hidden_states": latent_model_input,
             "encoder_hidden_states": None,
             "encoder_hidden_states_image": image_embeds,
-            "timestep": timestep.to(device, dtype=torch.bfloat16),
+            "timestep": timestep,
             "mouse_cond": mouse_cond,
             "keyboard_cond": keyboard_cond,
             "return_dict": False,
@@ -401,6 +404,8 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             except Exception:
                 grad_value = 0.0
         training_batch.grad_norm = grad_value
+        B, S, T, C, H, W = traj_latents.shape
+        training_batch.raw_latent_shape = (B, C, T, H, W)
         return training_batch
 
     def _prepare_validation_batch(self, sampling_param: SamplingParam,

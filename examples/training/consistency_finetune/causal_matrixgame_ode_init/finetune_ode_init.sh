@@ -26,8 +26,8 @@ training_args=(
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
   --num_latent_t 21
-  --num_height 480
-  --num_width 832
+  --num_height 352
+  --num_width 640
   --num_frames 81
   --warp_denoising_step
   --enable_gradient_checkpointing_type "full"
@@ -56,11 +56,11 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  --log_validation
-  --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
-  --validation_sampling_steps "50"
-  --validation_guidance_scale "6.0"
+  # --log_validation
+  # --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  # --validation_steps 50
+  # --validation_sampling_steps "50"
+  # --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments

@@ -422,6 +422,8 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
+        norm_hidden_states, hidden_states = norm_hidden_states.to(
+            orig_dtype), hidden_states.to(orig_dtype)
 
         # norm3 weights are loaded into self_attn_residual_norm.norm
         attn_output = self.attn2(norm_hidden_states,
@@ -877,7 +879,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             encoder_hidden_states = encoder_hidden_states[0]
         if isinstance(encoder_hidden_states_image, list) and len(encoder_hidden_states_image) > 0:
             encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
+        elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
         ctx = get_forward_context()
