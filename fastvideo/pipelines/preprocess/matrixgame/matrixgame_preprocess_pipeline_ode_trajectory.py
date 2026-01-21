@@ -422,8 +422,8 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                     clip_feature_np = clip_features[idx].cpu().numpy()
                     first_frame_latent_np = image_latents[idx].cpu().numpy()
                     pil_image_np = pil_image[idx].cpu().numpy()
-                    keyboard_cond_np = keyboard_cond[
-                        idx] if keyboard_cond is not None else None
+                    target_keyboard_dim = getattr(fastvideo_args, 'override_keyboard_dim_in', 3)
+                    keyboard_cond_np = keyboard_cond[idx][:, :target_keyboard_dim] if keyboard_cond is not None else None
                     mouse_cond_np = mouse_cond[
                         idx] if mouse_cond is not None else None
 
