@@ -585,7 +585,7 @@ class TransformerLoader(ComponentLoader):
         if fastvideo_args.override_action_config is not None:
             with open(fastvideo_args.override_action_config, 'r') as f:
                 action_config = json.load(f)
-                dit_config.action_config = action_config
+                dit_config.arch_config.action_config = action_config
                 logger.info("Overriding action config to %s", action_config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
