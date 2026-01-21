@@ -42,9 +42,9 @@ def check_safetensor_shapes(file_path):
         print(f"Failed to read file: {e}")
 
 if __name__ == "__main__":
-    # path_to_file = "Matrix-Game-2.0-Student-Diffusers/transformer/diffusion_pytorch_model.safetensors" 
+    path_to_file = "Matrix-Game-2.0-Student-Diffusers/transformer/diffusion_pytorch_model.safetensors" 
     # path_to_file = "Matrix-Game-2.0-Student-Diffusers/transformer_processed/diffusion_pytorch_model.safetensors" 
     # path_to_file = "Matrix-Game-2.0-TempleRun-Diffusers/transformer/diffusion_pytorch_model.safetensors"
     # path_to_file = "Matrix-Game-2.0-GTA-Diffusers/transformer/diffusion_pytorch_model.safetensors"
-    path_to_file = "checkpoints/matrixgame_ode_init/checkpoint-100/transformer/diffusion_pytorch_model.safetensors"
+    # path_to_file = "checkpoints/matrixgame_ode_init/checkpoint-100/transformer/diffusion_pytorch_model.safetensors"
     check_safetensor_shapes(path_to_file)

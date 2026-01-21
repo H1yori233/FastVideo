@@ -5,7 +5,8 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
 # MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
+# MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
+MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
 DATA_DIR="footsies-action/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 STUDENT_ACTION_CONFIG="$(dirname "$0")/student_action_config.json"
@@ -18,7 +19,7 @@ training_args=(
   --tracker_project_name "matrixgame_ode_init"
   --output_dir "checkpoints/matrixgame_ode_init"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
-  --override_action_config "$STUDENT_ACTION_CONFIG"
+  # --override_action_config "$STUDENT_ACTION_CONFIG"
   --wandb_run_name "matrixgame_ode_init"
   # --max_train_steps 6000
   --max_train_steps 100
