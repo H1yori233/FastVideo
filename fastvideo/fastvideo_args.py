@@ -178,7 +178,6 @@ class FastVideoArgs:
 
     override_transformer_cls_name: str | None = None
     override_action_config: str | None = None  # path to JSON file for action config override
-    override_keyboard_dim_in: int | None = None  # Override keyboard dimension for student model
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
@@ -515,12 +514,6 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_action_config,
             help="Path to JSON file for action config override",
-        )
-        parser.add_argument(
-            "--override-keyboard-dim-in",
-            type=int,
-            default=FastVideoArgs.override_keyboard_dim_in,
-            help="Override keyboard dimension for student model",
         )
         parser.add_argument(
             "--override-pipeline-cls-name",

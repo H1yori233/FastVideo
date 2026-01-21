@@ -17,7 +17,6 @@ torchrun --nproc_per_node=$GPU_NUM \
     --flow_shift 5.0 \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
-    --override_keyboard_dim_in 3 \
     --train_fps 25 \
     --samples_per_file 8 \
     --flush_frequency 8 \

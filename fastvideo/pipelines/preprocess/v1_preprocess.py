@@ -67,7 +67,6 @@ def main(args) -> None:
     elif args.preprocess_task == "matrixgame":
         PreprocessPipeline = PreprocessPipeline_MatrixGame
     elif args.preprocess_task == "matrixgame_ode_trajectory":
-        fastvideo_args.override_keyboard_dim_in = args.override_keyboard_dim_in
         PreprocessPipeline = PreprocessPipeline_MatrixGame_ODE_Trajectory
     else:
         raise ValueError(
@@ -125,7 +124,6 @@ if __name__ == "__main__":
                             "matrixgame", "matrixgame_ode_trajectory"
                         ],
                         help="Type of preprocessing task to run")
-    parser.add_argument("--override_keyboard_dim_in", type=int, default=3)
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
     parser.add_argument("--text_max_length", type=int, default=256)
