@@ -167,6 +167,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         return flow_matching_loss, log_dict
 
+    def _build_distill_input_kwargs(
+            self, noise_input: torch.Tensor, timestep: torch.Tensor,
+            text_dict: dict[str, torch.Tensor] | None,
+            training_batch: TrainingBatch,
+            target_model: torch.nn.Module | None = None) -> TrainingBatch:
+        return super()._build_distill_input_kwargs(noise_input, timestep, text_dict, training_batch)
+
     def _generator_multi_step_simulation_forward(
             self,
             training_batch: TrainingBatch,
