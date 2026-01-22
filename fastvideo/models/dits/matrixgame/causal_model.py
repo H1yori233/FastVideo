@@ -687,7 +687,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             encoder_hidden_states = encoder_hidden_states[0]
         if isinstance(encoder_hidden_states_image, list) and len(encoder_hidden_states_image) > 0:
             encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
+        elif not isinstance(encoder_hidden_states_image, torch.Tensor):
             encoder_hidden_states_image = None
 
         ctx = get_forward_context()

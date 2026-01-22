@@ -15,7 +15,7 @@
 export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
 # different cache dir for different processes
-export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
+# export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29503
 export TOKENIZERS_PARALLELISM=false
 export WANDB_API_KEY=your_wandb_api_key
@@ -27,12 +27,12 @@ export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 NUM_GPUS=1
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-REAL_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"  # Critic model
+GENERATOR_MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
+REAL_SCORE_MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"  # Teacher model
+FAKE_SCORE_MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"  # Critic model
 
-DATA_DIR=your_data_dir
-VALIDATION_DATASET_FILE=your_validation_data_dir
+DATA_DIR="footsies-action/preprocessed/combined_parquet_dataset"
+VALIDATION_DATASET_FILE="/mnt/fast-disks/hao_lab/kaiqin/FastVideo/examples/training/consistency_finetune/causal_matrixgame_ode_init/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -44,8 +44,8 @@ training_args=(
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 21
-  --num_height 480
-  --num_width 832
+  --num_height 352
+  --num_width 640
   --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
@@ -76,11 +76,11 @@ dataset_args=(
 )
 
 validation_args=(
-  --log_validation
-  --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
-  --validation_sampling_steps "4"
-  --validation_guidance_scale "6.0" # not used for dmd inference
+  # --log_validation
+  # --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  # --validation_steps 50
+  # --validation_sampling_steps "4"
+  # --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
 optimizer_args=(
@@ -103,7 +103,7 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  --init_weights_from_safetensors your_ode_init_weights_path
+  # --init_weights_from_safetensors "checkpoints/matrixgame_ode_init/checkpoint-100/transformer/diffusion_pytorch_model.safetensors"
 )
 
 dmd_args=(

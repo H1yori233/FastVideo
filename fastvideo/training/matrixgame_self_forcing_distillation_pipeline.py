@@ -222,7 +222,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 # Build input kwargs for initial latent
                 training_batch_temp = self._build_distill_input_kwargs(
                     initial_latent, timestep * 0,
-                    training_batch.conditional_dict, training_batch)
+                    training_batch.conditional_dict, training_batch,
+                    frame_start=0, frame_end=1)
                 # we process the image latent with self.transformer_2 (low-noise expert)
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
                 current_model(
@@ -277,7 +278,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                         # Build input kwargs
                         training_batch_temp = self._build_distill_input_kwargs(
                             noisy_input, timestep,
-                            training_batch.conditional_dict, training_batch)
+                            training_batch.conditional_dict, training_batch,
+                            frame_start=current_start_frame,
+                            frame_end=current_start_frame + current_num_frames)
 
                         pred_flow = current_model(
                             hidden_states=training_batch_temp.
@@ -319,7 +322,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                         with torch.no_grad():
                             training_batch_temp = self._build_distill_input_kwargs(
                                 noisy_input, timestep,
-                                training_batch.conditional_dict, training_batch)
+                                training_batch.conditional_dict, training_batch,
+                                frame_start=current_start_frame,
+                                frame_end=current_start_frame + current_num_frames)
 
                             pred_flow = current_model(
                                 hidden_states=training_batch_temp.
@@ -341,7 +346,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     else:
                         training_batch_temp = self._build_distill_input_kwargs(
                             noisy_input, timestep,
-                            training_batch.conditional_dict, training_batch)
+                            training_batch.conditional_dict, training_batch,
+                            frame_start=current_start_frame,
+                            frame_end=current_start_frame + current_num_frames)
 
                         pred_flow = current_model(
                             hidden_states=training_batch_temp.
@@ -383,7 +390,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             with torch.no_grad():
                 training_batch_temp = self._build_distill_input_kwargs(
                     denoised_pred, context_timestep,
-                    training_batch.conditional_dict, training_batch)
+                    training_batch.conditional_dict, training_batch,
+                    frame_start=current_start_frame,
+                    frame_end=current_start_frame + current_num_frames)
 
                 # context_timestep is 0 so we use transformer_2
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
@@ -580,6 +589,11 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         image_latents = training_batch.image_latents.to(
             get_local_torch_device(), dtype=torch.bfloat16)
 
+        if image_latents.shape[1] > 16:
+            logger.info("DEBUG: image_latents shape is already prepared")
+            # Already prepared
+            return training_batch
+
         temporal_compression_ratio = 4
         num_frames = (self.training_args.num_latent_t -
                       1) * temporal_compression_ratio + 1
@@ -615,23 +629,29 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
     def _build_distill_input_kwargs(
             self, noise_input: torch.Tensor, timestep: torch.Tensor,
             text_dict: dict[str, torch.Tensor],
-            training_batch: TrainingBatch) -> TrainingBatch:
+            training_batch: TrainingBatch,
+            frame_start: int | None = None,
+            frame_end: int | None = None) -> TrainingBatch:
         # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
         assert torch.isnan(image_embeds).sum() == 0
         image_embeds = image_embeds.to(get_local_torch_device(),
                                        dtype=torch.bfloat16)
 
+        image_latents = training_batch.image_latents
+        if frame_start is not None and frame_end is not None:
+            image_latents = image_latents[:, :, frame_start:frame_end, :, :]
+
         noisy_model_input = torch.cat(
             [noise_input,
-             training_batch.image_latents.permute(0, 2, 1, 3, 4)],
+             image_latents.permute(0, 2, 1, 3, 4)],
             dim=2)
 
         training_batch.input_kwargs = {
             "hidden_states": noisy_model_input.permute(0, 2, 1, 3,
                                                        4),  # bs, c, t, h, w
-            "encoder_hidden_states": text_dict["encoder_hidden_states"],
-            "encoder_attention_mask": text_dict["encoder_attention_mask"],
+            "encoder_hidden_states": None,
+            "encoder_attention_mask": None,
             "timestep": timestep,
             "encoder_hidden_states_image": image_embeds,
             "return_dict": False,
