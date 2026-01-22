@@ -10,6 +10,7 @@ from torch.nn.attention.flex_attention import flex_attention
 from fastvideo.attention import LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import FP32LayerNorm, RMSNorm
+from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import (
     get_nd_rotary_pos_embed as _fv_get_nd_rotary_pos_embed,
     _apply_rotary_emb,
@@ -110,10 +111,12 @@ class ActionModule(nn.Module):
         self.rope_dim_list = rope_dim_list
         self.rope_theta = rope_theta
         if self.enable_keyboard:
-            self.keyboard_embed = nn.Sequential(
-                nn.Linear(keyboard_dim_in, hidden_size, bias=True),
-                nn.SiLU(),
-                nn.Linear(hidden_size, hidden_size, bias=True)
+            self.keyboard_embed = MLP(
+                input_dim=keyboard_dim_in,
+                mlp_hidden_dim=hidden_size,
+                output_dim=hidden_size,
+                bias=True,
+                act_type="silu"
             )
 
         self.mouse_qk_dim_list = mouse_qk_dim_list
@@ -121,9 +124,13 @@ class ActionModule(nn.Module):
         if self.enable_mouse:
             c = mouse_hidden_dim
             self.mouse_mlp = nn.Sequential(
-                nn.Linear(mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size, c, bias=True),
-                nn.GELU(approximate="tanh"),
-                nn.Linear(c, c),
+                MLP(
+                    input_dim=mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size,
+                    mlp_hidden_dim=c,
+                    output_dim=c,
+                    bias=True,
+                    act_type="gelu_pytorch_tanh"
+                ),
                 FP32LayerNorm(c, elementwise_affine=True),
             )
             

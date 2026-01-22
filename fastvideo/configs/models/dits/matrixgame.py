@@ -44,6 +44,16 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
             r"blocks.\1.ffn.fc_out.\2",
             r"^blocks\.(\d+)\.norm2\.(.*)$":
             r"blocks.\1.self_attn_residual_norm.norm.\2",
+            r"^blocks\.(\d+)\.action_model\.mouse_mlp\.0\.(weight|bias)$":
+            r"blocks.\1.action_model.mouse_mlp.0.fc_in.\2",
+            r"^blocks\.(\d+)\.action_model\.mouse_mlp\.2\.(weight|bias)$":
+            r"blocks.\1.action_model.mouse_mlp.0.fc_out.\2",
+            r"^blocks\.(\d+)\.action_model\.mouse_mlp\.3\.(weight|bias)$":
+            r"blocks.\1.action_model.mouse_mlp.1.\2",
+            r"^blocks\.(\d+)\.action_model\.keyboard_embed\.0\.(weight|bias)$":
+            r"blocks.\1.action_model.keyboard_embed.fc_in.\2",
+            r"^blocks\.(\d+)\.action_model\.keyboard_embed\.2\.(weight|bias)$":
+            r"blocks.\1.action_model.keyboard_embed.fc_out.\2",
         })
 
     action_config: dict = field(
