@@ -19,7 +19,7 @@ sequence_indices = [2, 2, 2, 2, 2, 2, 0]
 
 OUTPUT_PATH = "finetune2_output"
 def main():
-    model_path = "Matrix-Game-2.0-Foundation-Diffusers"
+    model_path = "Matrix-Game-2.0-Student-Diffusers"
 
     generator = VideoGenerator.from_pretrained(
         model_path,
@@ -28,6 +28,7 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
+        # init_weights_from_safetensors="Matrix-Game-2.0-Student-Diffusers/transformer/diffusion_pytorch_model.safetensors"
     )
 
     num_frames = 81
