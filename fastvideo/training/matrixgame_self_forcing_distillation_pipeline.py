@@ -234,8 +234,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     timestep=training_batch_temp.input_kwargs['timestep'],
                     encoder_hidden_states_image=training_batch_temp.
                     input_kwargs.get('encoder_hidden_states_image'),
-                    keyboard_cond=training_batch.keyboard_cond_student,
-                    mouse_cond=training_batch.mouse_cond,
+                    keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
+                    mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                     kv_cache=self.kv_cache1,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
@@ -291,8 +291,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             input_kwargs['timestep'],
                             encoder_hidden_states_image=training_batch_temp.
                             input_kwargs.get('encoder_hidden_states_image'),
-                            keyboard_cond=training_batch.keyboard_cond_student,
-                            mouse_cond=training_batch.mouse_cond,
+                            keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
+                            mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
@@ -335,8 +335,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                 input_kwargs['timestep'],
                                 encoder_hidden_states_image=training_batch_temp.
                                 input_kwargs.get('encoder_hidden_states_image'),
-                                keyboard_cond=training_batch.keyboard_cond_student,
-                                mouse_cond=training_batch.mouse_cond,
+                                keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
+                                mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                                 kv_cache=self.kv_cache1,
                                 crossattn_cache=self.crossattn_cache,
                                 current_start=current_start_frame *
@@ -359,8 +359,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             input_kwargs['timestep'],
                             encoder_hidden_states_image=training_batch_temp.
                             input_kwargs.get('encoder_hidden_states_image'),
-                            keyboard_cond=training_batch.keyboard_cond_student,
-                            mouse_cond=training_batch.mouse_cond,
+                            keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
+                            mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
@@ -404,8 +404,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     timestep=training_batch_temp.input_kwargs['timestep'],
                     encoder_hidden_states_image=training_batch_temp.
                     input_kwargs.get('encoder_hidden_states_image'),
-                    keyboard_cond=training_batch.keyboard_cond_student,
-                    mouse_cond=training_batch.mouse_cond,
+                    keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
+                    mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                     kv_cache=self.kv_cache1,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
@@ -642,6 +642,15 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         if frame_start is not None and frame_end is not None:
             image_latents = image_latents[:, :, frame_start:frame_end, :, :]
 
+        vae_temporal_compression_ratio = 4
+        if frame_end is not None:
+            action_frame_end = (frame_end - 1) * vae_temporal_compression_ratio + 1
+            keyboard_cond_sliced = training_batch.keyboard_cond_student[:, :action_frame_end, :] if training_batch.keyboard_cond_student is not None else None
+            mouse_cond_sliced = training_batch.mouse_cond[:, :action_frame_end, :] if training_batch.mouse_cond is not None else None
+        else:
+            keyboard_cond_sliced = training_batch.keyboard_cond_student
+            mouse_cond_sliced = training_batch.mouse_cond
+
         noisy_model_input = torch.cat(
             [noise_input,
              image_latents.permute(0, 2, 1, 3, 4)],
@@ -654,6 +663,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             "encoder_attention_mask": None,
             "timestep": timestep,
             "encoder_hidden_states_image": image_embeds,
+            "keyboard_cond": keyboard_cond_sliced,
+            "mouse_cond": mouse_cond_sliced,
             "return_dict": False,
         }
         training_batch.noise_latents = noise_input
@@ -686,11 +697,15 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 timestep).detach().unflatten(0,
                                              (1, generator_pred_video.shape[1]))
 
+            image_latents = training_batch.image_latents
+            noisy_model_input = torch.cat(
+                [noisy_latent, image_latents.permute(0, 2, 1, 3, 4)], dim=2)
+
             # fake_score_transformer forward (uses keyboard_cond dim=6)
             current_fake_score_transformer = self._get_fake_score_transformer(
                 timestep)
             fake_score_pred_noise = current_fake_score_transformer(
-                hidden_states=noisy_latent.permute(0, 2, 1, 3, 4),
+                hidden_states=noisy_model_input.permute(0, 2, 1, 3, 4),
                 encoder_hidden_states=None,
                 encoder_hidden_states_image=training_batch.image_embeds,
                 timestep=timestep,
@@ -709,7 +724,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             current_real_score_transformer = self._get_real_score_transformer(
                 timestep)
             real_score_pred_noise = current_real_score_transformer(
-                hidden_states=noisy_latent.permute(0, 2, 1, 3, 4),
+                hidden_states=noisy_model_input.permute(0, 2, 1, 3, 4),
                 encoder_hidden_states=None,
                 encoder_hidden_states_image=training_batch.image_embeds,
                 timestep=timestep,
@@ -783,13 +798,18 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             fake_score_timestep).unflatten(0,
                                            (1, generator_pred_video.shape[1]))
 
+        # Concat with image_latents for I2V model (expected 36 channels = 16 latent + 20 cond)
+        image_latents = training_batch.image_latents
+        noisy_model_input = torch.cat(
+            [noisy_generator_pred_video, image_latents.permute(0, 2, 1, 3, 4)], dim=2)
+
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
             # Critic uses keyboard_cond dim=6
             current_fake_score_transformer = self._get_fake_score_transformer(
                 fake_score_timestep)
             fake_score_pred_noise = current_fake_score_transformer(
-                hidden_states=noisy_generator_pred_video.permute(0, 2, 1, 3, 4),
+                hidden_states=noisy_model_input.permute(0, 2, 1, 3, 4),
                 encoder_hidden_states=None,
                 encoder_hidden_states_image=training_batch.image_embeds,
                 timestep=fake_score_timestep,
