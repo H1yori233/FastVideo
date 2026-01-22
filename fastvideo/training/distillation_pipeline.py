@@ -85,7 +85,7 @@ class DistillationPipeline(TrainingPipeline):
         if training_args.real_score_model_path:
             logger.info("Loading real score transformer from: %s",
                         training_args.real_score_model_path)
-            training_args.override_transformer_cls_name = "WanTransformer3DModel"
+            # training_args.override_transformer_cls_name = "WanTransformer3DModel"
             # TODO(will): can use deepcopy instead if the model is the same
             self.real_score_transformer = self.load_module_from_path(
                 training_args.real_score_model_path, "transformer",
@@ -111,7 +111,7 @@ class DistillationPipeline(TrainingPipeline):
         if training_args.fake_score_model_path:
             logger.info("Loading fake score transformer from: %s",
                         training_args.fake_score_model_path)
-            training_args.override_transformer_cls_name = "WanTransformer3DModel"
+            # training_args.override_transformer_cls_name = "WanTransformer3DModel"
             self.fake_score_transformer = self.load_module_from_path(
                 training_args.fake_score_model_path, "transformer",
                 training_args)

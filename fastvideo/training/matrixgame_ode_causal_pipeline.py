@@ -128,7 +128,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         clip_feature = batch['clip_feature']
         first_frame_latent = batch['first_frame_latent']
         keyboard_cond = batch.get('keyboard_cond', None)
-        keyboard_cond = keyboard_cond[:, :3] # TODO: remove hardcode
+        keyboard_cond = keyboard_cond[:, :, :3] # TODO: remove hardcode
         mouse_cond = batch.get('mouse_cond', None)
         infos = batch['info_list']
 
