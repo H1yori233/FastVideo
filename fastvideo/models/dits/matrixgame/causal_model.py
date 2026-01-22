@@ -548,6 +548,9 @@ class CausalMatrixGameWanModel(BaseDiT):
         self.block_mask_keyboard = None
         self.block_mask_mouse = None
         self.use_rope_keyboard = True
+        self._block_mask_cache = None
+        self._block_mask_keyboard_cache = None
+        self._block_mask_mouse_cache = None
 
         self.num_frame_per_block = getattr(arch_cfg, 'num_frames_per_block', getattr(config, 'num_frame_per_block', 1)) if arch_cfg else getattr(config, 'num_frame_per_block', 1)
 
@@ -660,6 +663,65 @@ class CausalMatrixGameWanModel(BaseDiT):
             print(f" cache a block wise causal mask for action with block size of {num_frame_per_block} frames")
 
         return block_mask2
+
+    def _ensure_block_masks(
+        self,
+        device: torch.device | str,
+        num_frames: int,
+        frame_seqlen: int,
+        num_frame_per_block: int,
+    ) -> None:
+        block_key = (num_frames, frame_seqlen, num_frame_per_block, self.local_attn_size)
+        if self.block_mask is None or self._block_mask_cache != block_key:
+            self.block_mask = self._prepare_blockwise_causal_attn_mask(
+                device=device,
+                num_frames=num_frames,
+                frame_seqlen=frame_seqlen,
+                num_frame_per_block=num_frame_per_block,
+                local_attn_size=self.local_attn_size,
+            )
+            self._block_mask_cache = block_key
+
+        if self.use_rope_keyboard:
+            keyboard_frame_seqlen = 1
+        else:
+            keyboard_frame_seqlen = frame_seqlen
+        keyboard_key = (
+            num_frames,
+            keyboard_frame_seqlen,
+            num_frame_per_block,
+            self.local_attn_size,
+            self.use_rope_keyboard,
+        )
+        if self.block_mask_keyboard is None or self._block_mask_keyboard_cache != keyboard_key:
+            if self.use_rope_keyboard:
+                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
+                    device=device,
+                    num_frames=num_frames,
+                    frame_seqlen=1,
+                    num_frame_per_block=num_frame_per_block,
+                    local_attn_size=self.local_attn_size,
+                )
+            else:
+                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
+                    device=device,
+                    num_frames=num_frames,
+                    frame_seqlen=frame_seqlen,
+                    num_frame_per_block=num_frame_per_block,
+                    local_attn_size=self.local_attn_size,
+                )
+            self._block_mask_keyboard_cache = keyboard_key
+
+        mouse_key = (num_frames, 1, num_frame_per_block, self.local_attn_size)
+        if self.block_mask_mouse is None or self._block_mask_mouse_cache != mouse_key:
+            self.block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
+                device=device,
+                num_frames=num_frames,
+                frame_seqlen=1,
+                num_frame_per_block=num_frame_per_block,
+                local_attn_size=self.local_attn_size,
+            )
+            self._block_mask_mouse_cache = mouse_key
 
     def _forward_inference(
         self,
@@ -778,39 +840,12 @@ class CausalMatrixGameWanModel(BaseDiT):
             else:
                 encoder_hidden_states = encoder_hidden_states_image
 
-        if self.block_mask is None:
-            self.block_mask = self._prepare_blockwise_causal_attn_mask(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=post_patch_height * post_patch_width,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size
-            )
-        if self.block_mask_keyboard is None:
-            if not self.use_rope_keyboard:
-                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
-                    device=hidden_states.device,
-                    num_frames=num_frames,
-                    frame_seqlen=post_patch_height * post_patch_width,
-                    num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size
-                )
-            else:
-                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
-                    device=hidden_states.device,
-                    num_frames=num_frames,
-                    frame_seqlen=1,
-                    num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size
-                )
-        if self.block_mask_mouse is None:
-            self.block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=1,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size
-            )
+        self._ensure_block_masks(
+            device=hidden_states.device,
+            num_frames=num_frames,
+            frame_seqlen=post_patch_height * post_patch_width,
+            num_frame_per_block=effective_num_frame_per_block,
+        )
         if kv_cache is None:
             kv_cache = [None] * len(self.blocks)
         if kv_cache_mouse is None:
@@ -928,39 +963,12 @@ class CausalMatrixGameWanModel(BaseDiT):
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
-        if self.block_mask is None:
-            self.block_mask = self._prepare_blockwise_causal_attn_mask(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=post_patch_height * post_patch_width,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size
-            )
-        if self.block_mask_keyboard is None:
-            if not self.use_rope_keyboard:
-                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
-                    device=hidden_states.device,
-                    num_frames=num_frames,
-                    frame_seqlen=post_patch_height * post_patch_width,
-                    num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size
-                )
-            else:
-                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
-                    device=hidden_states.device,
-                    num_frames=num_frames,
-                    frame_seqlen=1,
-                    num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size
-                )
-        if self.block_mask_mouse is None:
-            self.block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=1,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size
-            )
+        self._ensure_block_masks(
+            device=hidden_states.device,
+            num_frames=num_frames,
+            frame_seqlen=post_patch_height * post_patch_width,
+            num_frame_per_block=self.num_frame_per_block,
+        )
 
         hidden_states = self.patch_embedding(hidden_states)
         grid_sizes = torch.tensor([post_patch_num_frames, post_patch_height, post_patch_width],
