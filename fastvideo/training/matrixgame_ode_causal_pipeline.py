@@ -107,6 +107,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             loaded_modules={
                 "transformer": self.get_module("transformer"),
                 "vae": self.get_module("vae"),
+                "scheduler": self.get_module("scheduler"),
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
@@ -128,7 +129,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         clip_feature = batch['clip_feature']
         first_frame_latent = batch['first_frame_latent']
         keyboard_cond = batch.get('keyboard_cond', None)
-        keyboard_cond = keyboard_cond[:, :, :3] # TODO: remove hardcode
+        # keyboard_cond = keyboard_cond[:, :, :3] # TODO: remove hardcode
         mouse_cond = batch.get('mouse_cond', None)
         infos = batch['info_list']
 
@@ -316,6 +317,15 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         latent_model_input = latent_model_input.to(device, dtype=torch.bfloat16)
         timestep = timestep.to(device, dtype=torch.bfloat16)
 
+        logger.info("========== Transformer Input ==========")
+        logger.info("hidden_states (latent_model_input) shape: %s, dtype: %s", latent_model_input.shape, latent_model_input.dtype)
+        logger.info("hidden_states min/max/mean: %.4f / %.4f / %.4f",
+                    latent_model_input.min().item(), latent_model_input.max().item(), latent_model_input.mean().item())
+        logger.info("encoder_hidden_states_image (image_embeds) shape: %s", image_embeds.shape if image_embeds is not None else None)
+        logger.info("timestep shape: %s, dtype: %s", timestep.shape, timestep.dtype)
+        logger.info("keyboard_cond: %s", keyboard_cond.shape if keyboard_cond is not None else None)
+        logger.info("mouse_cond: %s", mouse_cond.shape if mouse_cond is not None else None)
+
         input_kwargs = {
             "hidden_states": latent_model_input,
             "encoder_hidden_states": None,
@@ -330,6 +340,11 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
                                  attn_metadata=None,
                                  forward_batch=None):
             noise_pred = self.transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+
+        logger.info("========== Transformer Output ==========")
+        logger.info("noise_pred shape: %s", noise_pred.shape)
+        logger.info("noise_pred min/max/mean: %.4f / %.4f / %.4f",
+                    noise_pred.min().item(), noise_pred.max().item(), noise_pred.mean().item())
 
         from fastvideo.models.utils import pred_noise_to_pred_video
         pred_video = pred_noise_to_pred_video(

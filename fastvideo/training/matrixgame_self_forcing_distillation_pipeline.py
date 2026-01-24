@@ -567,7 +567,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             keyboard_cond_full = keyboard_cond.to(
                 get_local_torch_device(), dtype=torch.bfloat16)
             training_batch.keyboard_cond = keyboard_cond_full  # For Teacher/Critic (dim=6)
-            training_batch.keyboard_cond_student = keyboard_cond_full[:, :, :3]  # For Student (dim=3)
+            # training_batch.keyboard_cond_student = keyboard_cond_full[:, :, :3]  # For Student (dim=3)
         else:
             training_batch.keyboard_cond = None
             training_batch.keyboard_cond_student = None
