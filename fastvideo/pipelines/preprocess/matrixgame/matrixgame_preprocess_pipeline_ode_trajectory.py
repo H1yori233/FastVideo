@@ -158,22 +158,34 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                             enabled=True):
             encoder_outputs = self.get_module("vae").encode(video_conditions)
 
-        latent_condition = encoder_outputs.mean
-        if (hasattr(self.get_module("vae"), "shift_factor")
-                and self.get_module("vae").shift_factor is not None):
-            if isinstance(self.get_module("vae").shift_factor, torch.Tensor):
-                latent_condition -= self.get_module("vae").shift_factor.to(
+        # Use mode() instead of mean
+        latent_condition = encoder_outputs.mode()
+
+        # Use latents_mean/latents_std normalization to match
+        vae = self.get_module("vae")
+        if (hasattr(vae.config, 'latents_mean')
+                and hasattr(vae.config, 'latents_std')):
+            latents_mean = torch.tensor(vae.config.latents_mean,
+                                        device=latent_condition.device,
+                                        dtype=latent_condition.dtype).view(
+                                            1, -1, 1, 1, 1)
+            latents_std = torch.tensor(vae.config.latents_std,
+                                       device=latent_condition.device,
+                                       dtype=latent_condition.dtype).view(
+                                           1, -1, 1, 1, 1)
+            latent_condition = (latent_condition - latents_mean) / latents_std
+        elif (hasattr(vae, "shift_factor") and vae.shift_factor is not None):
+            if isinstance(vae.shift_factor, torch.Tensor):
+                latent_condition -= vae.shift_factor.to(
                     latent_condition.device, latent_condition.dtype)
             else:
-                latent_condition -= self.get_module("vae").shift_factor
+                latent_condition -= vae.shift_factor
 
-        if isinstance(self.get_module("vae").scaling_factor, torch.Tensor):
-            latent_condition = latent_condition * self.get_module(
-                "vae").scaling_factor.to(latent_condition.device,
-                                         latent_condition.dtype)
-        else:
-            latent_condition = latent_condition * self.get_module(
-                "vae").scaling_factor
+            if isinstance(vae.scaling_factor, torch.Tensor):
+                latent_condition = latent_condition * vae.scaling_factor.to(
+                    latent_condition.device, latent_condition.dtype)
+            else:
+                latent_condition = latent_condition * vae.scaling_factor
 
         # mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
         #                            latent_width)
