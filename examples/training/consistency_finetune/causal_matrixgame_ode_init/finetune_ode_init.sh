@@ -10,8 +10,9 @@ MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
 DATA_DIR="footsies-action/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 STUDENT_ACTION_CONFIG="$(dirname "$0")/student_action_config.json"
-NUM_GPUS=8
-# export CUDA_VISIBLE_DEVICES=4,5
+# NUM_GPUS=8
+NUM_GPUS=4
+# export CUDA_VISIBLE_DEVICES=4,5,6,7
 # IP=[MASTER NODE IP]
 
 # Training arguments
@@ -22,7 +23,7 @@ training_args=(
   # --override_action_config "$STUDENT_ACTION_CONFIG"
   --wandb_run_name "matrixgame_ode_init"
   # --max_train_steps 6000
-  --max_train_steps 100
+  --max_train_steps 800
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
@@ -39,8 +40,12 @@ parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 2
   --tp_size 1
-  --hsdp_replicate_dim 4
-  --hsdp_shard_dim 2
+  --hsdp_replicate_dim 1
+  --hsdp_shard_dim $NUM_GPUS
+  # --sp_size 4
+  # --tp_size 1
+  # --hsdp_replicate_dim 1
+  # --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
@@ -57,19 +62,19 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  # --log_validation
-  # --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  # --validation_steps 50
-  # --validation_sampling_steps "50"
-  # --validation_guidance_scale "6.0"
+  --log_validation
+  --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_steps 50
+  --validation_sampling_steps "50"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 100
+  --training_state_checkpointing_steps 100
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

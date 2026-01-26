@@ -24,7 +24,7 @@ export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 # Configs
-NUM_GPUS=1
+NUM_GPUS=4
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
@@ -38,11 +38,11 @@ VALIDATION_DATASET_FILE="/mnt/fast-disks/hao_lab/kaiqin/FastVideo/examples/train
 
 training_args=(
   --tracker_project_name matrixgame_distill_self_forcing_dmd  
-  --output_dir your_output_dir
-  --max_train_steps 4000
+  --output_dir "checkpoints/matrixgame_distill_self_forcing_dmd"
+  --max_train_steps 400
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 4
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -76,18 +76,18 @@ dataset_args=(
 )
 
 validation_args=(
-  # --log_validation
-  # --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  # --validation_steps 50
-  # --validation_sampling_steps "4"
-  # --validation_guidance_scale "6.0" # not used for dmd inference
+  --log_validation
+  --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_steps 50
+  --validation_sampling_steps "4"
+  --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
 optimizer_args=(
   --learning_rate 1e-5
   --mixed_precision "bf16"
-  --training_state_checkpointing_steps 500
-  --weight_only_checkpointing_steps 500
+  --training_state_checkpointing_steps 100
+  --weight_only_checkpointing_steps 100
   --weight_decay 0.01
   --betas '0.0,0.999'
   --max_grad_norm 1.0
@@ -103,7 +103,7 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  # --init_weights_from_safetensors "checkpoints/matrixgame_ode_init/checkpoint-100/transformer/diffusion_pytorch_model.safetensors"
+  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init/checkpoint-800/transformer/diffusion_pytorch_model.safetensors"
 )
 
 dmd_args=(

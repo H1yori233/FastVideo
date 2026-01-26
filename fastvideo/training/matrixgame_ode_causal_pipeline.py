@@ -99,6 +99,13 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
+        # Use the same flow-matching scheduler as training for consistent validation.
+        validation_scheduler = SelfForcingFlowMatchScheduler(
+            shift=args_copy.pipeline_config.flow_shift,
+            sigma_min=0.0,
+            extra_one_step=True)
+        validation_scheduler.set_timesteps(num_inference_steps=1000,
+                                           training=True)
         # Warm start validation with current transformer
         self.validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
             training_args.model_path,
@@ -107,7 +114,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             loaded_modules={
                 "transformer": self.get_module("transformer"),
                 "vae": self.get_module("vae"),
-                "scheduler": self.get_module("scheduler"),
+                "scheduler": validation_scheduler,
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
@@ -257,14 +264,16 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
-            self._cached_closest_idx_per_dmd = torch.tensor(
-                [0, 12, 24, 36], dtype=torch.long).cpu()
-            # [0, 1, 2, 3], dtype=torch.long).cpu()
+            traj_ts = traj_timesteps[0].float().cpu()
+            dmd_steps = self.dmd_denoising_steps.float().cpu()
+            closest_idx = torch.argmin(
+                torch.abs(traj_ts.unsqueeze(0) - dmd_steps.unsqueeze(1)),
+                dim=1)
+            self._cached_closest_idx_per_dmd = closest_idx.to(torch.long).cpu()
             logger.info("self._cached_closest_idx_per_dmd: %s",
                         self._cached_closest_idx_per_dmd)
-            logger.info(
-                "corresponding timesteps: %s", self.noise_scheduler.timesteps[
-                    self._cached_closest_idx_per_dmd])
+            logger.info("corresponding timesteps: %s",
+                        traj_ts[self._cached_closest_idx_per_dmd])
 
         # Select the K indexes from traj_latents using self._cached_closest_idx_per_dmd
         # traj_latents: [B, S, C, T, H, W], self._cached_closest_idx_per_dmd: [K]

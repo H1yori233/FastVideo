@@ -5,21 +5,21 @@ import random
 import numpy as np
 
 action_patterns = [
-    # [0, 0, 1, 0, 0, 0],
+    [0, 0, 1, 0, 0, 0],
     [0, 0, 0, 0, 0, 0],
-    # [0, 1, 0, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0],
 ]
 
 action_map = {
-    # tuple(action_patterns[0]): "Left  (0)",
-    # tuple(action_patterns[1]): "Stop  (1)",
-    # tuple(action_patterns[2]): "Right (2)",
-    tuple(action_patterns[0]): "Stop  (0)",
+    tuple(action_patterns[0]): "Left  (0)",
+    tuple(action_patterns[1]): "Stop  (1)",
+    tuple(action_patterns[2]): "Right (2)",
+    # tuple(action_patterns[0]): "Stop  (0)",
 }
 
 num_frames = 81
-# data_nums = 32
-data_nums = 4
+data_nums = 32
+# data_nums = 4
 dataset_root = "footsies-action"
 actions_dir = os.path.join(dataset_root, "actions")
 images_dir = os.path.join(dataset_root, "validate")

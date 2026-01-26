@@ -8,20 +8,23 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from einops import rearrange
 
+from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.dataloader.schema import (
     pyarrow_schema_matrixgame_ode_trajectory)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
+    SelfForcingFlowMatchScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
     MatrixGameCausalDMDPipeline)
-from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.self_forcing_distillation_pipeline import (
     SelfForcingDistillationPipeline)
 from fastvideo.training.training_utils import shift_timestep
-from fastvideo.utils import is_vsa_available
+from fastvideo.utils import is_vsa_available, shallow_asdict
 
 vsa_available = is_vsa_available()
 
@@ -508,23 +511,29 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(training_args)
-
         args_copy.inference_mode = True
-        validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
+        # Use the same flow-matching scheduler as training for consistent validation.
+        validation_scheduler = SelfForcingFlowMatchScheduler(
+            shift=args_copy.pipeline_config.flow_shift,
+            sigma_min=0.0,
+            extra_one_step=True)
+        validation_scheduler.set_timesteps(num_inference_steps=1000,
+                                           training=True)
+        # Warm start validation with current transformer
+        self.validation_pipeline = MatrixGameCausalDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
-                "transformer_2": self.get_module("transformer_2")
+                "vae": self.get_module("vae"),
+                "scheduler": validation_scheduler,
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=True)
-
-        self.validation_pipeline = validation_pipeline
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -828,6 +837,54 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         }
 
         return training_batch, flow_matching_loss
+
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: dict[str, Any],
+                                  num_inference_steps: int) -> ForwardBatch:
+        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.height = training_args.num_height
+        sampling_param.width = training_args.num_width
+        sampling_param.image_path = validation_batch.get(
+            'image_path') or validation_batch.get('video_path')
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        assert self.seed is not None
+        sampling_param.seed = self.seed
+
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                        sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (training_args.num_latent_t -
+                      1) * temporal_compression_factor + 1
+        sampling_param.num_frames = num_frames
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            latents=None,
+            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
+        )
+        if "image" in validation_batch and validation_batch["image"] is not None:
+            batch.pil_image = validation_batch["image"]
+
+        if "keyboard_cond" in validation_batch and validation_batch[
+                "keyboard_cond"] is not None:
+            keyboard_cond = validation_batch["keyboard_cond"]
+            keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
+            keyboard_cond = keyboard_cond.unsqueeze(0)
+            batch.keyboard_cond = keyboard_cond
+
+        if "mouse_cond" in validation_batch and validation_batch[
+                "mouse_cond"] is not None:
+            mouse_cond = validation_batch["mouse_cond"]
+            mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
+            mouse_cond = mouse_cond.unsqueeze(0)
+            batch.mouse_cond = mouse_cond
+
+        return batch
 
 
 def main(args) -> None:
