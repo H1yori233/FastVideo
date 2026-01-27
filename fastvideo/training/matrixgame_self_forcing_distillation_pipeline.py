@@ -125,7 +125,103 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 False
             })
 
+        # Initialize action module KV caches
+        action_config = getattr(self.transformer, 'action_config', {})
+        action_blocks = action_config.get('blocks', []) if action_config else []
+        
+        action_heads_num = action_config.get('heads_num', 16) if action_config else 16
+        mouse_hidden_dim = action_config.get('mouse_hidden_dim', 1024) if action_config else 1024
+        keyboard_hidden_dim = action_config.get('keyboard_hidden_dim', 1024) if action_config else 1024
+        local_attn_size = action_config.get('local_attn_size', 6) if action_config else 6
+        
+        mouse_head_dim = mouse_hidden_dim // action_heads_num
+        keyboard_head_dim = keyboard_hidden_dim // action_heads_num
+        
+        action_cache_size = local_attn_size
+        kv_cache_mouse = []
+        kv_cache_keyboard = []
+        for block_idx in range(num_transformer_blocks):
+            if block_idx in action_blocks:
+                kv_cache_mouse.append({
+                    "k":
+                    torch.zeros([
+                        batch_size * frame_seq_length, action_cache_size, action_heads_num,
+                        mouse_head_dim
+                    ],
+                                dtype=dtype,
+                                device=device),
+                    "v":
+                    torch.zeros([
+                        batch_size * frame_seq_length, action_cache_size, action_heads_num,
+                        mouse_head_dim
+                    ],
+                                dtype=dtype,
+                                device=device),
+                    "global_end_index":
+                    torch.tensor([0], dtype=torch.long, device=device),
+                    "local_end_index":
+                    torch.tensor([0], dtype=torch.long, device=device)
+                })
+                kv_cache_keyboard.append({
+                    "k":
+                    torch.zeros([
+                        1, action_cache_size, action_heads_num,
+                        keyboard_head_dim
+                    ],
+                                dtype=dtype,
+                                device=device),
+                    "v":
+                    torch.zeros([
+                        1, action_cache_size, action_heads_num,
+                        keyboard_head_dim
+                    ],
+                                dtype=dtype,
+                                device=device),
+                    "global_end_index":
+                    torch.tensor([0], dtype=torch.long, device=device),
+                    "local_end_index":
+                    torch.tensor([0], dtype=torch.long, device=device)
+                })
+            else:
+                kv_cache_mouse.append(None)
+                kv_cache_keyboard.append(None)
+        
+        self.kv_cache_mouse = kv_cache_mouse
+        self.kv_cache_keyboard = kv_cache_keyboard
+
         return kv_cache, crossattn_cache
+    
+    def _reset_simulation_caches(self, kv_cache: list[dict[str, Any]],
+                                 crossattn_cache: list[dict[str, Any]]) -> None:
+        """Reset KV cache, cross-attention cache, and action caches to clean state."""
+        if kv_cache is not None:
+            for cache_dict in kv_cache:
+                cache_dict["global_end_index"].fill_(0)
+                cache_dict["local_end_index"].fill_(0)
+                cache_dict["k"].zero_()
+                cache_dict["v"].zero_()
+
+        if crossattn_cache is not None:
+            for cache_dict in crossattn_cache:
+                cache_dict["is_init"] = False
+                cache_dict["k"].zero_()
+                cache_dict["v"].zero_()
+        
+        if hasattr(self, 'kv_cache_mouse') and self.kv_cache_mouse is not None:
+            for cache_dict in self.kv_cache_mouse:
+                if cache_dict is not None:
+                    cache_dict["global_end_index"].fill_(0)
+                    cache_dict["local_end_index"].fill_(0)
+                    cache_dict["k"].zero_()
+                    cache_dict["v"].zero_()
+        
+        if hasattr(self, 'kv_cache_keyboard') and self.kv_cache_keyboard is not None:
+            for cache_dict in self.kv_cache_keyboard:
+                if cache_dict is not None:
+                    cache_dict["global_end_index"].fill_(0)
+                    cache_dict["local_end_index"].fill_(0)
+                    cache_dict["k"].zero_()
+                    cache_dict["v"].zero_()
 
     def _generator_multi_step_simulation_forward(
             self,
@@ -240,6 +336,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
                     mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                     kv_cache=self.kv_cache1,
+                    kv_cache_mouse=self.kv_cache_mouse,
+                    kv_cache_keyboard=self.kv_cache_keyboard,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
@@ -297,6 +395,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
                             mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                             kv_cache=self.kv_cache1,
+                            kv_cache_mouse=self.kv_cache_mouse,
+                            kv_cache_keyboard=self.kv_cache_keyboard,
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
@@ -341,6 +441,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                 keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
                                 mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                                 kv_cache=self.kv_cache1,
+                                kv_cache_mouse=self.kv_cache_mouse,
+                                kv_cache_keyboard=self.kv_cache_keyboard,
                                 crossattn_cache=self.crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
@@ -365,6 +467,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
                             mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                             kv_cache=self.kv_cache1,
+                            kv_cache_mouse=self.kv_cache_mouse,
+                            kv_cache_keyboard=self.kv_cache_keyboard,
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
@@ -410,6 +514,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     keyboard_cond=training_batch_temp.input_kwargs.get('keyboard_cond'),
                     mouse_cond=training_batch_temp.input_kwargs.get('mouse_cond'),
                     kv_cache=self.kv_cache1,
+                    kv_cache_mouse=self.kv_cache_mouse,
+                    kv_cache_keyboard=self.kv_cache_keyboard,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
