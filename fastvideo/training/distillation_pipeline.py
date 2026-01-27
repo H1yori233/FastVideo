@@ -1240,17 +1240,22 @@ class DistillationPipeline(TrainingPipeline):
                     batch = self._prepare_validation_batch(
                         sampling_param, training_args, validation_batch, steps)
 
-                    negative_prompt = batch.negative_prompt
-                    batch_negative = ForwardBatch(
-                        data_type="video",
-                        prompt=negative_prompt,
-                        prompt_embeds=[],
-                        prompt_attention_mask=[],
-                    )
-                    result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-                        batch_negative, training_args)
-                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                        0], result_batch.prompt_attention_mask[0]
+                    if hasattr(self.validation_pipeline,
+                               "prompt_encoding_stage"):
+                        negative_prompt = batch.negative_prompt
+                        batch_negative = ForwardBatch(
+                            data_type="video",
+                            prompt=negative_prompt,
+                            prompt_embeds=[],
+                            prompt_attention_mask=[],
+                        )
+                        result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
+                            batch_negative, training_args)
+                        self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                            0], result_batch.prompt_attention_mask[0]
+                    else:
+                        self.negative_prompt_embeds = None
+                        self.negative_prompt_attention_mask = None
 
                     logger.info(
                         "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
@@ -1364,6 +1369,8 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_log_keys = ['generator_pred_video']
         dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
 
+        os.makedirs(training_args.output_dir, exist_ok=True)
+
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
             latents = latents.permute(0, 2, 1, 3, 4)
@@ -1388,8 +1395,17 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
+                
+                video_filename = os.path.join(
+                    training_args.output_dir,
+                    f"{latent_key}_step_{step}.mp4"
+                )
+                # [B, T, C, H, W] to [H, W, C]
+                video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                imageio.mimsave(video_filename, video_frames, fps=24)
+                
                 video_artifact = self.tracker.video(
-                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                    video_filename, caption=latent_key)  # change to 16 for Wan2.1
                 if video_artifact is not None:
                     tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references
@@ -1421,8 +1437,17 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
+                
+                video_filename = os.path.join(
+                    training_args.output_dir,
+                    f"{latent_key}_step_{step}.mp4"
+                )
+                # [B, T, C, H, W] to [H, W, C]
+                video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                imageio.mimsave(video_filename, video_frames, fps=24)
+                
                 video_artifact = self.tracker.video(
-                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                    video_filename, caption=latent_key)  # change to 16 for Wan2.1
                 if video_artifact is not None:
                     tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references

@@ -39,7 +39,7 @@ VALIDATION_DATASET_FILE="/mnt/fast-disks/hao_lab/kaiqin/FastVideo/examples/train
 training_args=(
   --tracker_project_name matrixgame_distill_self_forcing_dmd  
   --output_dir "checkpoints/matrixgame_distill_self_forcing_dmd"
-  --max_train_steps 400
+  --max_train_steps 600
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
@@ -78,13 +78,13 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
+  --validation_steps 10
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 6e-6
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 100
   --weight_only_checkpointing_steps 100
@@ -107,7 +107,7 @@ miscellaneous_args=(
 )
 
 dmd_args=(
-  --dmd_denoising_steps '1000,666,333'
+  --dmd_denoising_steps '1000,750,500,250'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5

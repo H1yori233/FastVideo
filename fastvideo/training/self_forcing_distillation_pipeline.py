@@ -5,6 +5,7 @@ import time
 from collections import deque
 from typing import Any
 
+import imageio
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -833,6 +834,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             logger.info("Fake score latent keys: %s",
                         list(training_batch.fake_score_latent_vis_dict.keys()))
 
+        os.makedirs(training_args.output_dir, exist_ok=True)
+
         # Process generator predictions if available
         if hasattr(
                 training_batch,
@@ -875,9 +878,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.cpu().float()
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
-                    video_artifact = self.tracker.video(video,
-                                                        fps=24,
-                                                        format="mp4")
+                    
+                    video_filename = os.path.join(
+                        training_args.output_dir,
+                        f"dmd_{latent_key}_step_{step}.mp4"
+                    )
+                    # [B, T, C, H, W] to [H, W, C]
+                    video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                    imageio.mimsave(video_filename, video_frames, fps=24)
+                    
+                    video_artifact = self.tracker.video(video_filename,
+                                                        caption=f"dmd_{latent_key}")
                     if video_artifact is not None:
                         tracker_loss_dict[f"dmd_{latent_key}"] = video_artifact
                     del video, latents
@@ -920,9 +931,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.cpu().float()
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
-                    video_artifact = self.tracker.video(video,
-                                                        fps=24,
-                                                        format="mp4")
+                    
+                    video_filename = os.path.join(
+                        training_args.output_dir,
+                        f"critic_{latent_key}_step_{step}.mp4"
+                    )
+                    # [B, T, C, H, W] to [H, W, C]
+                    video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                    imageio.mimsave(video_filename, video_frames, fps=24)
+                    
+                    video_artifact = self.tracker.video(video_filename,
+                                                        caption=f"critic_{latent_key}")
                     if video_artifact is not None:
                         tracker_loss_dict[
                             f"critic_{latent_key}"] = video_artifact
