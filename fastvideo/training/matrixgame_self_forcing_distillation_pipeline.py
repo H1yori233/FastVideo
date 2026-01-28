@@ -132,12 +132,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         action_heads_num = action_config.get('heads_num', 16) if action_config else 16
         mouse_hidden_dim = action_config.get('mouse_hidden_dim', 1024) if action_config else 1024
         keyboard_hidden_dim = action_config.get('keyboard_hidden_dim', 1024) if action_config else 1024
-        local_attn_size = action_config.get('local_attn_size', 6) if action_config else 6
+        local_attn_size = getattr(self.transformer, "local_attn_size",
+                                  action_config.get('local_attn_size', 6) if action_config else 6)
         
         mouse_head_dim = mouse_hidden_dim // action_heads_num
         keyboard_head_dim = keyboard_hidden_dim // action_heads_num
         
-        action_cache_size = local_attn_size
+        action_cache_size = 15 if local_attn_size == -1 else local_attn_size
         kv_cache_mouse = []
         kv_cache_keyboard = []
         for block_idx in range(num_transformer_blocks):
@@ -165,14 +166,14 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 kv_cache_keyboard.append({
                     "k":
                     torch.zeros([
-                        1, action_cache_size, action_heads_num,
+                        batch_size, action_cache_size, action_heads_num,
                         keyboard_head_dim
                     ],
                                 dtype=dtype,
                                 device=device),
                     "v":
                     torch.zeros([
-                        1, action_cache_size, action_heads_num,
+                        batch_size, action_cache_size, action_heads_num,
                         keyboard_head_dim
                     ],
                                 dtype=dtype,

@@ -256,6 +256,48 @@ class ActionModule(nn.Module):
         )
         return freqs_cos[-video_length*rope_sizes[1]*rope_sizes[2]//self.patch_size[0]:], freqs_sin[-video_length*rope_sizes[1]*rope_sizes[2]//self.patch_size[0]:]
 
+    def _update_kv_cache(
+        self,
+        kv_cache: dict,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        current_start: int,
+        max_attention_size: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        current_end = current_start + k.shape[1]
+        sink_tokens = 0
+        kv_cache_size = kv_cache["k"].shape[1]
+        num_new_tokens = k.shape[1]
+
+        if (current_end > kv_cache["global_end_index"].item()) and (
+                num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+            num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+            num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
+            kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+            kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+            local_end_index = kv_cache["local_end_index"].item() + current_end - \
+                kv_cache["global_end_index"].item() - num_evicted_tokens
+            local_start_index = local_end_index - num_new_tokens
+        else:
+            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+            local_start_index = local_end_index - num_new_tokens
+            kv_cache["k"] = kv_cache["k"].detach()
+            kv_cache["v"] = kv_cache["v"].detach()
+
+        kv_cache["k"][:, local_start_index:local_end_index] = k
+        kv_cache["v"][:, local_start_index:local_end_index] = v
+
+        kv_start = max(0, local_end_index - max_attention_size)
+        k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
+        v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+
+        kv_cache["global_end_index"].fill_(current_end)
+        kv_cache["local_end_index"].fill_(local_end_index)
+        return k_for_attn, v_for_attn
+
     def forward(self, x, tt, th, tw, mouse_condition=None, keyboard_condition=None, block_mask_mouse=None, block_mask_keyboard=None, is_causal=False, kv_cache_mouse=None, kv_cache_keyboard=None, start_frame=0, use_rope_keyboard=True, num_frame_per_block=3):
         '''
         hidden_states: B, tt*th*tw, C
@@ -359,42 +401,20 @@ class ActionModule(nn.Module):
                         block_mask=block_mask_mouse
                     )[:, :, :-padded_length].transpose(2, 1)
                 else:
-                    current_start = start_frame
-                    current_end = current_start + q.shape[1]
-                    
                     assert q.shape[1] == num_frame_per_block
-                    sink_size = 0
-                    max_attention_size = self.local_attn_size
-                    sink_tokens = sink_size * 1
-                    kv_cache_size = kv_cache_mouse["k"].shape[1]
-                    num_new_tokens = q.shape[1]
-                    
-
-                    if (current_end > kv_cache_mouse["global_end_index"].item()) and (
-                        num_new_tokens + kv_cache_mouse["local_end_index"].item() > kv_cache_size):
-                        num_evicted_tokens = num_new_tokens + kv_cache_mouse["local_end_index"].item() - kv_cache_size
-                        num_rolled_tokens = kv_cache_mouse["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                        kv_cache_mouse["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                            kv_cache_mouse["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                        kv_cache_mouse["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                            kv_cache_mouse["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                        # Insert the new keys/values at the end
-                        local_end_index = kv_cache_mouse["local_end_index"].item() + current_end - \
-                            kv_cache_mouse["global_end_index"].item() - num_evicted_tokens
-                        local_start_index = local_end_index - num_new_tokens
-                    else:
-                        local_end_index = kv_cache_mouse["local_end_index"].item() + current_end - kv_cache_mouse["global_end_index"].item()
-                        local_start_index = local_end_index - num_new_tokens
-                    kv_cache_mouse["k"][:, local_start_index:local_end_index] = k
-                    kv_cache_mouse["v"][:, local_start_index:local_end_index] = v
-
+                    max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
+                    k_for_attn, v_for_attn = self._update_kv_cache(
+                        kv_cache_mouse,
+                        k,
+                        v,
+                        current_start=start_frame,
+                        max_attention_size=max_attention_size,
+                    )
                     attn = self.mouse_attn_layer(
                         q,
-                        kv_cache_mouse["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                        kv_cache_mouse["v"][:, max(0, local_end_index - max_attention_size):local_end_index],
+                        k_for_attn,
+                        v_for_attn,
                     )
-                    kv_cache_mouse["global_end_index"].fill_(current_end)
-                    kv_cache_mouse["local_end_index"].fill_(local_end_index)
             else:
                 attn = self.mouse_attn_layer(q, k, v)
             # Compute cu_squlens and max_seqlen for flash attention
@@ -443,14 +463,14 @@ class ActionModule(nn.Module):
                 T_ = TS // S 
                 q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
                 q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
-
-                k1, k2, k3, k4 = k.shape
-                k = k.repeat_interleave(S, dim=0)  
-                v = v.repeat_interleave(S, dim=0)
+                k_base = k
+                v_base = v
 
 
                 if is_causal:
                     if kv_cache_keyboard is None:
+                        k = k_base.repeat_interleave(S, dim=0)
+                        v = v_base.repeat_interleave(S, dim=0)
                         assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0 
 
                         padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
@@ -477,43 +497,24 @@ class ActionModule(nn.Module):
                             block_mask=block_mask_keyboard
                         )[:, :, :-padded_length].transpose(2, 1)
                     else:
-                        current_start = start_frame
-                        current_end = current_start + k.shape[1]
                         assert k.shape[1] == num_frame_per_block
-                        sink_size = 0
-                        max_attention_size = self.local_attn_size
-                        sink_tokens = sink_size * 1
-                        kv_cache_size = kv_cache_keyboard["k"].shape[1]
-                        num_new_tokens = k.shape[1]
-
-                        if (current_end > kv_cache_keyboard["global_end_index"].item()) and (
-                            num_new_tokens + kv_cache_keyboard["local_end_index"].item() > kv_cache_size):
-                            num_evicted_tokens = num_new_tokens + kv_cache_keyboard["local_end_index"].item() - kv_cache_size
-                            num_rolled_tokens = kv_cache_keyboard["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                            kv_cache_keyboard["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                                kv_cache_keyboard["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                            kv_cache_keyboard["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                                kv_cache_keyboard["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                            # Insert the new keys/values at the end
-                            local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - \
-                                kv_cache_keyboard["global_end_index"].item() - num_evicted_tokens
-                            local_start_index = local_end_index - num_new_tokens
-                        else:
-                            local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - kv_cache_keyboard["global_end_index"].item()
-                            local_start_index = local_end_index - num_new_tokens
-                        assert k.shape[0] == S # BS == 1 or the cache should not be saved/ load method should be modified
-                        kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k[:1]
-                        kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v[:1]
+                        max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
+                        k_for_attn, v_for_attn = self._update_kv_cache(
+                            kv_cache_keyboard,
+                            k_base,
+                            v_base,
+                            current_start=start_frame,
+                            max_attention_size=max_attention_size,
+                        )
 
                         attn = self.keyboard_attn_layer(
                             q,
-                            kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
-                            kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
+                            k_for_attn.repeat_interleave(S, dim=0),
+                            v_for_attn.repeat_interleave(S, dim=0),
                         )
-
-                        kv_cache_keyboard["global_end_index"].fill_(current_end)
-                        kv_cache_keyboard["local_end_index"].fill_(local_end_index)
                 else:
+                    k = k_base.repeat_interleave(S, dim=0)
+                    v = v_base.repeat_interleave(S, dim=0)
                     attn = self.keyboard_attn_layer(q, k, v)
                 attn = rearrange(attn, '(B S) T H D -> B (T S) (H D)', S=S)
             else:
@@ -545,41 +546,20 @@ class ActionModule(nn.Module):
                         )[:, :, :-padded_length].transpose(2, 1)
                     else:
                         current_start = start_frame
-                        current_end = current_start + k.shape[1]
                         assert k.shape[1] == num_frame_per_block
-                        sink_size = 0
-                        max_attention_size = self.local_attn_size
-                        sink_tokens = sink_size * 1
-                        kv_cache_size = kv_cache_keyboard["k"].shape[1]
-                        num_new_tokens = k.shape[1]
-
-
-                        if (current_end > kv_cache_keyboard["global_end_index"].item()) and (
-                            num_new_tokens + kv_cache_keyboard["local_end_index"].item() > kv_cache_size):
-                            num_evicted_tokens = num_new_tokens + kv_cache_keyboard["local_end_index"].item() - kv_cache_size
-                            num_rolled_tokens = kv_cache_keyboard["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                            kv_cache_keyboard["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                                kv_cache_keyboard["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                            kv_cache_keyboard["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                                kv_cache_keyboard["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                            # Insert the new keys/values at the end
-                            local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - \
-                                kv_cache_keyboard["global_end_index"].item() - num_evicted_tokens
-                            local_start_index = local_end_index - num_new_tokens
-
-                            
-                        else:
-                            local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - kv_cache_keyboard["global_end_index"].item()
-                            local_start_index = local_end_index - num_new_tokens
-                        kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k
-                        kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v
+                        max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
+                        k_for_attn, v_for_attn = self._update_kv_cache(
+                            kv_cache_keyboard,
+                            k,
+                            v,
+                            current_start=current_start,
+                            max_attention_size=max_attention_size,
+                        )
                         attn = self.keyboard_attn_layer(
                             q,
-                            kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                            kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index],
+                            k_for_attn,
+                            v_for_attn,
                         )
-                        kv_cache_keyboard["global_end_index"].fill_(current_end)
-                        kv_cache_keyboard["local_end_index"].fill_(local_end_index)
                 else:
                     attn = self.keyboard_attn_layer(q, k, v)
                 attn = rearrange(attn, 'B L H D -> B L (H D)')
