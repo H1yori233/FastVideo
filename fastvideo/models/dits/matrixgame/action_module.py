@@ -314,6 +314,8 @@ class ActionModule(nn.Module):
         if keyboard_condition is not None:
             keyboard_condition = keyboard_condition.to(
                 device=target_device, dtype=target_dtype)
+        else:
+            return x
 
         B, N_frames, C = keyboard_condition.shape
         assert tt*th*tw == x.shape[1]
@@ -463,14 +465,14 @@ class ActionModule(nn.Module):
                 T_ = TS // S 
                 q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
                 q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
-                k_base = k
-                v_base = v
+
+                k1, k2, k3, k4 = k.shape
+                k = k.repeat_interleave(S, dim=0)  
+                v = v.repeat_interleave(S, dim=0)
 
 
                 if is_causal:
                     if kv_cache_keyboard is None:
-                        k = k_base.repeat_interleave(S, dim=0)
-                        v = v_base.repeat_interleave(S, dim=0)
                         assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0 
 
                         padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
@@ -498,6 +500,7 @@ class ActionModule(nn.Module):
                         )[:, :, :-padded_length].transpose(2, 1)
                     else:
                         assert k.shape[1] == num_frame_per_block
+                        
                         max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
                         k_for_attn, v_for_attn = self._update_kv_cache(
                             kv_cache_keyboard,

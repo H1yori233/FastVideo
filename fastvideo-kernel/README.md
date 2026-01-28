@@ -34,10 +34,21 @@ from fastvideo_kernel import sliding_tile_attention, video_sparse_attn, moba_att
 out = sliding_tile_attention(q, k, v, window_sizes, text_len)
 
 # Example: Video Sparse Attention (with Triton fallback)
-out = video_sparse_attn(q, k, v, block_sizes, topk=5)
+out = video_sparse_attn(q, k, v, block_sizes, block_sizes, topk=5)
 
 # Example: VMoBA
 out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
+```
+
+## Benchmark
+
+### VSA (block-sparse) TFLOPs
+
+After building/installing `fastvideo-kernel`, run:
+
+```bash
+cd fastvideo-kernel
+python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
 ```
 
 ### TurboDiffusion Kernels

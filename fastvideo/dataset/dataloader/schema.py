@@ -190,4 +190,3 @@ pyarrow_schema_matrixgame_ode_trajectory = pa.schema([
     pa.field("caption", pa.string()),
     pa.field("media_type", pa.string()),  # 'image' or 'video'
 ])
-

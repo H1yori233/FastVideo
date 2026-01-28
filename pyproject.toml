@@ -29,6 +29,7 @@ dependencies = [
     "diffusers>=0.33.1",
     "torch>=2.9.1",
     "torchvision",
+    "torchaudio",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
@@ -44,6 +45,7 @@ dependencies = [
     "wandb>=0.21.0",
     "loguru",
     "test-tube==0.7.5",
+    
     # Miscellaneous Utilities
     "tqdm",
     "pytest",
@@ -56,6 +58,7 @@ dependencies = [
     "aiohttp",
     "huggingface_hub",
     "cloudpickle",
+    "omegaconf",
 
     # System & Monitoring Tools
     "gpustat",
@@ -63,7 +66,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.2",
+    "fastvideo-kernel==0.2.5",
     "wheel",
 
     # Training Dependencies

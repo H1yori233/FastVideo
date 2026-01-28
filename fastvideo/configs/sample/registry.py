@@ -6,10 +6,12 @@ from typing import Any
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import Hunyuan15_480P_SamplingParam, Hunyuan15_720P_SamplingParam
+from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
 from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
+from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
 
 # isort: off
 from fastvideo.configs.sample.wan import (
@@ -40,48 +42,37 @@ from fastvideo.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
 SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
-    "FastVideo/FastHunyuan-diffusers":
-    FastHunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo":
-    HunyuanSamplingParam,
+    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
+    "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
     Hunyuan15_480P_SamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers":
-    StepVideoT2VSamplingParam,
+    "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorld_SamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
 
     # Wan2.1
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers":
-    WanT2V_1_3B_SamplingParam,
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers":
-    WanT2V_14B_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers":
-    WanI2V_14B_480P_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers":
-    WanI2V_14B_720P_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers":
     Wan2_1_Fun_1_3B_Control_SamplingParam,
 
     # Wan2.2
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers":
-    Wan2_2_TI2V_5B_SamplingParam,
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
     "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers":
     Wan2_2_TI2V_5B_SamplingParam,
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers":
-    Wan2_2_T2V_A14B_SamplingParam,
-    "Wan-AI/Wan2.2-I2V-A14B-Diffusers":
-    Wan2_2_I2V_A14B_SamplingParam,
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
+    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_SamplingParam,
 
     # FastWan2.1
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers":
-    FastWanT2V480P_SamplingParam,
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480P_SamplingParam,
 
     # FastWan2.2
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers":
-    Wan2_2_TI2V_5B_SamplingParam,
+    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
 
     # Causal Self-Forcing Wan2.1
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers":
@@ -102,12 +93,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
 
     # MatrixGame2.0 models
-    "FastVideo/Matrix-Game-2.0-Base-Diffusers":
-    MatrixGame2_SamplingParam,
-    "FastVideo/Matrix-Game-2.0-GTA-Diffusers":
-    MatrixGame2_SamplingParam,
-    "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers":
-    MatrixGame2_SamplingParam,
+    "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGame2_SamplingParam,
+    "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGame2_SamplingParam,
+    "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGame2_SamplingParam,
 
     # TurboDiffusion models
     "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers":
@@ -116,6 +104,10 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     TurboDiffusionT2V_14B_SamplingParam,
     "loayrashid/TurboWan2.2-I2V-A14B-Diffusers":
     TurboDiffusionI2V_A14B_SamplingParam,
+
+    # LTX-2 models
+    "Lightricks/LTX-2": LTX2SamplingParam,
+    "FastVideo/LTX2-Distilled-Diffusers": LTX2SamplingParam,
 
     # Add other specific weight variants
 }
@@ -126,6 +118,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "hunyuan" in id.lower(),
     "hunyuan15":
     lambda id: "hunyuan15" in id.lower(),
+    "hyworld":
+    lambda id: "hyworld" in id.lower(),
     "wanpipeline":
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
@@ -144,6 +138,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "cosmos2_5" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower() and "2_5" not in id.lower(),
+    "ltx2":
+    lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -153,6 +149,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
     "hunyuan15":
     Hunyuan15_480P_SamplingParam,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
+    "hyworld":
+    HYWorld_SamplingParam,  # HYWorld-specific config as fallback for any HYWorld variant
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
@@ -164,13 +162,13 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback
     "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
     "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
+    "ltx2": LTX2SamplingParam,
     # Other fallbacks by architecture
 }
 
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
-
     # First try exact match for specific weights
     if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
         return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
