@@ -1038,7 +1038,9 @@ class CausalMatrixGameWanModel(BaseDiT):
                     block_mask_mouse=self.block_mask_mouse,
                     block_mask_keyboard=self.block_mask_keyboard,
                     num_frame_per_block=self.num_frame_per_block,
-                    use_rope_keyboard=self.use_rope_keyboard)
+                    use_rope_keyboard=self.use_rope_keyboard,
+                    current_start=kwargs.get("current_start", 0),
+                    cache_start=kwargs.get("cache_start", 0))
             else:
                 hidden_states = block(
                     hidden_states,
@@ -1056,7 +1058,9 @@ class CausalMatrixGameWanModel(BaseDiT):
                     block_mask_mouse=self.block_mask_mouse,
                     block_mask_keyboard=self.block_mask_keyboard,
                     num_frame_per_block=self.num_frame_per_block,
-                    use_rope_keyboard=self.use_rope_keyboard)
+                    use_rope_keyboard=self.use_rope_keyboard,
+                    current_start=kwargs.get("current_start", 0),
+                    cache_start=kwargs.get("cache_start", 0))
 
         temb = temb.unflatten(dim=0, sizes=(batch_size, post_patch_num_frames)).unsqueeze(2)
         shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)

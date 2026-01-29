@@ -138,7 +138,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         mouse_head_dim = mouse_hidden_dim // action_heads_num
         keyboard_head_dim = keyboard_hidden_dim // action_heads_num
         
-        action_cache_size = 15 if local_attn_size == -1 else local_attn_size
+        action_cache_size = max_num_frames
         kv_cache_mouse = []
         kv_cache_keyboard = []
         for block_idx in range(num_transformer_blocks):
@@ -609,9 +609,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 min_num_frames, dtype=torch.float32, device=self.device)
 
         # Clean up caches
-        assert self.kv_cache1 is not None
-        assert self.crossattn_cache is not None
-        self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
+        # Clean up caches - REMOVED from here to allow backward recompute
+        # assert self.kv_cache1 is not None
+        # assert self.crossattn_cache is not None
+        # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
 
         return final_output if gradient_mask is not None else pred_image_or_video
 
