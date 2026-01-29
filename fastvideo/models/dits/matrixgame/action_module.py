@@ -16,6 +16,9 @@ from fastvideo.layers.rotary_embedding import (
     _apply_rotary_emb,
 )
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 DISABLE_COMPILE = False
@@ -265,30 +268,60 @@ class ActionModule(nn.Module):
         current_start: int,
         max_attention_size: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        current_end = current_start + k.shape[1]
+        # Ensure k and v are 4D [B, T, H, D]
+        if k.ndim == 3:
+            k = k.unsqueeze(0)
+            v = v.unsqueeze(0)
+            
+        num_new_tokens = k.shape[1]
+        current_end = current_start + num_new_tokens
         sink_tokens = 0
         kv_cache_size = kv_cache["k"].shape[1]
-        num_new_tokens = k.shape[1]
+        
+        # Logging for debugging recomputation issues
+        if current_end <= kv_cache["global_end_index"].item():
+            logger.debug(f"[ActionModule] Recompute detected: current_start={current_start}, "
+                         f"new_tokens={num_new_tokens}, global_end={kv_cache['global_end_index'].item()}")
 
+        # Calculate tentative indices
+        # tentative_local_end can grow beyond kv_cache_size during recompute if global_end_index/local_end_index were reset
+        tentative_local_end = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+        
         if (current_end > kv_cache["global_end_index"].item()) and (
                 num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
             num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
             num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-            kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-            kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+            if num_rolled_tokens > 0:
+                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
             local_end_index = kv_cache["local_end_index"].item() + current_end - \
                 kv_cache["global_end_index"].item() - num_evicted_tokens
             local_start_index = local_end_index - num_new_tokens
         else:
-            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
-            local_start_index = local_end_index - num_new_tokens
+            # During recompute or when not exceeding size, map back to sliding window bounds
+            local_end_index = max(0, min(tentative_local_end, kv_cache_size))
+            local_start_index = max(0, local_end_index - num_new_tokens)
+            
             kv_cache["k"] = kv_cache["k"].detach()
             kv_cache["v"] = kv_cache["v"].detach()
 
-        kv_cache["k"][:, local_start_index:local_end_index] = k
-        kv_cache["v"][:, local_start_index:local_end_index] = v
+        # Ensure k and v match the slice length (handle edge cases where k is larger than buffer)
+        expected_len = local_end_index - local_start_index
+        if k.shape[1] > expected_len:
+            k = k[:, -expected_len:] if expected_len > 0 else k[:, :0]
+            v = v[:, -expected_len:] if expected_len > 0 else v[:, :0]
+
+        try:
+            if expected_len > 0:
+                kv_cache["k"][:, local_start_index:local_end_index] = k
+                kv_cache["v"][:, local_start_index:local_end_index] = v
+        except RuntimeError as e:
+            logger.error(f"[ActionModule] KV update failed: tentative_end={tentative_local_end}, "
+                         f"local_start={local_start_index}, local_end={local_end_index}, "
+                         f"k_shape={k.shape}, cache_shape={kv_cache['k'].shape}")
+            raise e
 
         kv_start = max(0, local_end_index - max_attention_size)
         k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
