@@ -404,7 +404,7 @@ class ActionModule(nn.Module):
                     )[:, :, :-padded_length].transpose(2, 1)
                 else:
                     assert q.shape[1] == num_frame_per_block
-                    max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
+                    max_attention_size = self.local_attn_size
                     k_for_attn, v_for_attn = self._update_kv_cache(
                         kv_cache_mouse,
                         k,
@@ -465,14 +465,14 @@ class ActionModule(nn.Module):
                 T_ = TS // S 
                 q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
                 q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
-
-                k1, k2, k3, k4 = k.shape
-                k = k.repeat_interleave(S, dim=0)  
-                v = v.repeat_interleave(S, dim=0)
+                k_base = k
+                v_base = v
 
 
                 if is_causal:
                     if kv_cache_keyboard is None:
+                        k = k_base.repeat_interleave(S, dim=0)
+                        v = v_base.repeat_interleave(S, dim=0)
                         assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0 
 
                         padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
@@ -500,8 +500,7 @@ class ActionModule(nn.Module):
                         )[:, :, :-padded_length].transpose(2, 1)
                     else:
                         assert k.shape[1] == num_frame_per_block
-                        
-                        max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
+                        max_attention_size = self.local_attn_size
                         k_for_attn, v_for_attn = self._update_kv_cache(
                             kv_cache_keyboard,
                             k_base,
@@ -509,7 +508,6 @@ class ActionModule(nn.Module):
                             current_start=start_frame,
                             max_attention_size=max_attention_size,
                         )
-
                         attn = self.keyboard_attn_layer(
                             q,
                             k_for_attn.repeat_interleave(S, dim=0),
@@ -548,14 +546,13 @@ class ActionModule(nn.Module):
                             block_mask=block_mask_keyboard
                         )[:, :, :-padded_length].transpose(2, 1)
                     else:
-                        current_start = start_frame
                         assert k.shape[1] == num_frame_per_block
-                        max_attention_size = 15 if self.local_attn_size == -1 else self.local_attn_size
+                        max_attention_size = self.local_attn_size
                         k_for_attn, v_for_attn = self._update_kv_cache(
                             kv_cache_keyboard,
                             k,
                             v,
-                            current_start=current_start,
+                            current_start=start_frame,
                             max_attention_size=max_attention_size,
                         )
                         attn = self.keyboard_attn_layer(
