@@ -1,5 +1,5 @@
 from fastvideo import VideoGenerator
-from fastvideo.models.dits.matrix_game.utils import create_action_presets
+from fastvideo.models.dits.matrixgame.utils import create_action_presets
 
 import torch
 
@@ -11,7 +11,7 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "/workspace/Matrix-Game-2.0-Base-Diffusers",
+        "./Matrix-Game-2.0-Foundation-Diffusers",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=True,
