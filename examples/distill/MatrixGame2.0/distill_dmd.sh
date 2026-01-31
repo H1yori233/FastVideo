@@ -18,7 +18,7 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 # export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29503
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY=your_wandb_api_key
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -39,7 +39,7 @@ VALIDATION_DATASET_FILE="/mnt/fast-disks/hao_lab/kaiqin/FastVideo/examples/train
 training_args=(
   --tracker_project_name matrixgame_distill_self_forcing_dmd  
   --output_dir "checkpoints/matrixgame_distill_self_forcing_dmd"
-  --max_train_steps 600
+  --max_train_steps 500
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
@@ -53,6 +53,7 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
+  # --resume_from_checkpoint "checkpoints/matrixgame_distill_self_forcing_dmd/checkpoint-100"
 )
 
 parallel_args=(
@@ -78,7 +79,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 10
+  --validation_steps 50
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
@@ -86,8 +87,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --training_state_checkpointing_steps 100
-  --weight_only_checkpointing_steps 100
+  --training_state_checkpointing_steps 50
+  --weight_only_checkpointing_steps 50
   --weight_decay 0.01
   --betas '0.0,0.999'
   --max_grad_norm 1.0
@@ -103,7 +104,7 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init/checkpoint-800/transformer/diffusion_pytorch_model.safetensors"
+  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init/checkpoint-800/transformer"
 )
 
 dmd_args=(
