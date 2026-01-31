@@ -9,7 +9,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 4 \
+    --preprocess_video_batch_size 10 \
     --seed 42 \
     --max_height 352 \
     --max_width 640 \
@@ -18,7 +18,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
     --train_fps 25 \
-    --samples_per_file 8 \
-    --flush_frequency 8 \
+    --samples_per_file 10 \
+    --flush_frequency 10 \
     --video_length_tolerance_range 5 \
     --preprocess_task "matrixgame_ode_trajectory" 

@@ -53,11 +53,14 @@ def main():
 
     num_frames = 597
     actions = create_action_presets(num_frames, keyboard_dim=config["keyboard_dim"])
+    actions["keyboard"] = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * num_frames)
+    actions["mouse"] = torch.tensor([[0.0, 0.0]] * num_frames)
     grid_sizes = torch.tensor([150, 44, 80])
 
     generator.generate_video(
         prompt="",
-        image_path=config["image_url"],
+        # image_path=config["image_url"],
+        image_path="mc_wasd_action/validate/0.jpg",
         mouse_cond=actions["mouse"].unsqueeze(0),
         keyboard_cond=actions["keyboard"].unsqueeze(0),
         grid_sizes=grid_sizes,
