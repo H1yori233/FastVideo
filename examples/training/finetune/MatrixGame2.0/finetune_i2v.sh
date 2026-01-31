@@ -1,22 +1,21 @@
 #!/bin/bash
 
-export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
+MODEL_PATH="./Matrix-Game-2.0-Foundation-Diffusers"
 DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=4
+NUM_GPUS=6
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_finetune"
+  --tracker_project_name "matrixgame_finetune_mc"
   --output_dir "checkpoints/matrixgame_finetune"
-  --max_train_steps 1500
+  --max_train_steps 1000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
@@ -52,8 +51,8 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
-  --validation_sampling_steps "40"
+  --validation_steps 50
+  --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
 
@@ -61,8 +60,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 2e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 100
-  --training_state_checkpointing_steps 100
+  --weight_only_checkpointing_steps 50
+  --training_state_checkpointing_steps 50
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

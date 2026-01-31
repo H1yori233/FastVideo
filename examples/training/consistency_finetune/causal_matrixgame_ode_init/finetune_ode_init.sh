@@ -7,17 +7,17 @@ export TOKENIZERS_PARALLELISM=false
 # MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
 # MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
 MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
-DATA_DIR="footsies-action/preprocessed/combined_parquet_dataset"
+DATA_DIR="mc_wasd_action/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 STUDENT_ACTION_CONFIG="$(dirname "$0")/student_action_config.json"
 # NUM_GPUS=8
-NUM_GPUS=4
+NUM_GPUS=6
 # export CUDA_VISIBLE_DEVICES=4,5,6,7
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_ode_init"
+  --tracker_project_name "matrixgame_ode_init_mc"
   --output_dir "checkpoints/matrixgame_ode_init"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
   # --override_action_config "$STUDENT_ACTION_CONFIG"
@@ -38,14 +38,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 2
+  --sp_size 3
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
-  # --sp_size 4
-  # --tp_size 1
-  # --hsdp_replicate_dim 1
-  # --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments

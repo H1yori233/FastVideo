@@ -147,9 +147,10 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                         keyboard_cond_list.append(action_data.astype(np.float32))
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
+                print(f"keyboard_cond_list: {keyboard_cond_list}")
             if mouse_cond_list:
                 features["mouse_cond"] = mouse_cond_list
-
+                print(f"mouse_cond_list: {mouse_cond_list}")
         return features
 
     def create_record(
