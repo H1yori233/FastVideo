@@ -26,6 +26,7 @@ def main():
     num_frames = 57
     actions = create_action_presets(num_frames, keyboard_dim=6)
     grid_sizes = torch.tensor([15, 44, 80])
+    print(actions)
 
     generator.generate_video(
         prompt="",

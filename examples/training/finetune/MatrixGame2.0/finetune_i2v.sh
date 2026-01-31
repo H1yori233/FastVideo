@@ -6,10 +6,10 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
-DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
+DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=8
-# export CUDA_VISIBLE_DEVICES=4,5
+NUM_GPUS=4
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
 # IP=[MASTER NODE IP]
 
 # Training arguments
@@ -32,8 +32,8 @@ parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 2
   --tp_size 1
-  --hsdp_replicate_dim 4
-  --hsdp_shard_dim 2
+  --hsdp_replicate_dim 1
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
