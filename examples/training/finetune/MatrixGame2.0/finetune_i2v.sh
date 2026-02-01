@@ -13,7 +13,7 @@ NUM_GPUS=6
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_finetune_mc"
+  --tracker_project_name "matrixgame_finetune_car"
   --output_dir "checkpoints/matrixgame_finetune"
   --max_train_steps 1000
   --train_batch_size 1

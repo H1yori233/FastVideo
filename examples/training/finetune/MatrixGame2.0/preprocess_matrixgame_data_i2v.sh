@@ -2,8 +2,8 @@
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-DATA_MERGE_PATH="car_8/merge.txt"
-OUTPUT_DIR="car_8/preprocessed/"
+DATA_MERGE_PATH="mc_32k/merge.txt"
+OUTPUT_DIR="mc_32k/preprocessed/"
 
 # export CUDA_VISIBLE_DEVICES=0
 export MASTER_ADDR=localhost
@@ -14,7 +14,7 @@ export WORLD_SIZE=1
 python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 8 \
+    --preprocess_video_batch_size 1 \
     --seed 42 \
     --max_height 352 \
     --max_width 640 \

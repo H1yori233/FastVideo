@@ -4,16 +4,25 @@ import sys
 import numpy as np
 import glob
 import subprocess
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 # Configuration
-BASE_OUTPUT_DIR = 'car_8'
+BASE_OUTPUT_DIR = 'mc_32k'
 DATA_DIR = sys.argv[1] if len(sys.argv) > 1 else '.'
-NUM_WORKERS = 8  # Number of parallel workers
+NUM_WORKERS = 128  # Number of parallel workers
 VIDEO_OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, 'videos')
 VALIDATE_IMG_DIR = os.path.join(BASE_OUTPUT_DIR, 'validate')
 os.makedirs(VIDEO_OUTPUT_DIR, exist_ok=True)
 os.makedirs(VALIDATE_IMG_DIR, exist_ok=True)
+
+# Slicing Configuration
+FRAME_START = 11
+FRAME_COUNT = 77
+MOUSE_SHIFT = 1 # Mouse is shifted by this amount relative to keyboard
+ZERO_FIRST_FRAME = False # If True, first frame action is [0,0...] and others shift back
+NUM_SHARDS = 8 # Split output into N parts
 
 # Action Mapping Configuration
 KEY_TO_INDEX = {
@@ -124,17 +133,28 @@ def process_episode(episode_dir, episode_id):
         mouse_vector = view_action_to_mouse(view_action)
         mouse_list.append(mouse_vector)
     
-    # Slice & Shift: keyboard[11:88], mouse[12:89] (length 77)
-    sliced_keyboard = keyboard_list[11:11+77]
-    sliced_mouse = mouse_list[12:12+77]
-    
-    # Convert to numpy arrays
-    keyboard_arr = np.array(sliced_keyboard, dtype=np.float32)
-    mouse_arr = np.array(sliced_mouse, dtype=np.float32)
+    # Slice & Shift actions
+    if ZERO_FIRST_FRAME:
+        # Prepend zero to the first frame and shift others
+        sliced_kb = keyboard_list[FRAME_START : FRAME_START + FRAME_COUNT - 1]
+        sliced_ms = mouse_list[FRAME_START + MOUSE_SHIFT : FRAME_START + MOUSE_SHIFT + FRAME_COUNT - 1]
+        
+        keyboard_arr = np.zeros((FRAME_COUNT, 6), dtype=np.float32)
+        mouse_arr = np.zeros((FRAME_COUNT, 2), dtype=np.float32)
+        
+        keyboard_arr[1:] = sliced_kb
+        mouse_arr[1:] = sliced_ms
+    else:
+        # Standard slicing
+        sliced_kb = keyboard_list[FRAME_START : FRAME_START + FRAME_COUNT]
+        sliced_ms = mouse_list[FRAME_START + MOUSE_SHIFT : FRAME_START + MOUSE_SHIFT + FRAME_COUNT]
+        
+        keyboard_arr = np.array(sliced_kb, dtype=np.float32)
+        mouse_arr = np.array(sliced_ms, dtype=np.float32)
     
     # Apply majority vote to normalize actions within each block
-    keyboard_arr = majority_vote_blocks(keyboard_arr)
-    mouse_arr = majority_vote_blocks(mouse_arr)
+    # keyboard_arr = majority_vote_blocks(keyboard_arr)
+    # mouse_arr = majority_vote_blocks(mouse_arr)
     
     action_dict = {
         'keyboard': keyboard_arr,
@@ -150,11 +170,11 @@ def process_episode(episode_dir, episode_id):
     output_video_full = os.path.join(VIDEO_OUTPUT_DIR, output_video_rel)
     output_action_full = os.path.join(VIDEO_OUTPUT_DIR, output_action_rel)
     
-    # 3. Video Slicing (frames 11-87)
+    # 3. Video Slicing
     ffmpeg_video_cmd = [
         'ffmpeg', '-y',
         '-i', video_path,
-        '-vf', f"select='between(n,11,87)'",
+        '-vf', f"select='between(n,{FRAME_START},{FRAME_START + FRAME_COUNT - 1})'",
         '-vsync', 'vfr',
         output_video_full
     ]
@@ -183,7 +203,7 @@ def extract_validation_image(video_path, output_image_full):
     ffmpeg_img_cmd = [
         'ffmpeg', '-y',
         '-i', video_path,
-        '-vf', "select='eq(n,11)'",
+        '-vf', f"select='eq(n,{FRAME_START})'",
         '-vframes', '1',
         output_image_full
     ]
@@ -194,8 +214,10 @@ def extract_validation_image(video_path, output_image_full):
         print(f"Error extracting image from {video_path}: {e.stderr.decode()}")
         return False
 
-# Execution
-episode_dirs = sorted(glob.glob(os.path.join(DATA_DIR, 'episode_*')))
+episode_dirs = sorted([
+    d for d in glob.glob(os.path.join(DATA_DIR, '**', 'episode_*'))
+    if os.path.isdir(d)
+])
 results = []
 
 print(f"Found {len(episode_dirs)} episodes. Processing with {NUM_WORKERS} workers...")
@@ -207,49 +229,25 @@ with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         for i, ep_dir in enumerate(episode_dirs)
     }
     
+    pbar = tqdm(total=len(episode_dirs), desc="Processing Episodes")
     for future in as_completed(future_to_ep):
         i, ep_dir = future_to_ep[future]
         try:
             result = future.result()
             if result:
                 results.append(result)
-                print(f"[{len(results)}/{len(episode_dirs)}] Processed {ep_dir}")
         except Exception as e:
-            print(f"Error processing {ep_dir}: {e}")
+            tqdm.write(f"Error processing {ep_dir}: {e}")
+        pbar.update(1)
+    pbar.close()
 
 # Sort results by episode_id to maintain order
 results.sort(key=lambda x: x['episode_id'])
 
-# Build data structures
-v2c_data = []
-meta_data = []
-validation_data = []
-
-for result in results:
-    # video2caption.json format
-    v2c_data.append({
-        "path": result["path"],
-        "cap": [""],
-        "action_path": result["action_path"],
-        "resolution": {"width": 640, "height": 352},
-        "num_frames": 77,
-        "fps": 25,
-        "duration": 3.08
-    })
-    
-    # metadata.json format
-    meta_data.append({
-        "video_path": f"videos/{result['path']}",
-        "action_path": f"videos/{result['action_path']}",
-        "num_frames": 77,
-        "width": 640,
-        "height": 352,
-        "episode_id": result["episode_id"]
-    })
-
 # extract images only for first 8 validation items
+validation_data = []
 print(f"\nExtracting validation images for first 8 episodes...")
-for result in results[:8]:
+for result in tqdm(results[:8], desc="Extracting Images"):
     output_image_full = os.path.join(VALIDATE_IMG_DIR, result['image_path'])
     if extract_validation_image(result['video_path'], output_image_full):
         # Round values to fix float precision issues
@@ -258,32 +256,70 @@ for result in results[:8]:
 
         validation_data.append({
             "caption": str(result["episode_id"]),
-            "image_path": f"../../../../car_8/validate/{result['image_path']}",
+            "image_path": f"../../../../{BASE_OUTPUT_DIR}/validate/{result['image_path']}",
             "video_path": None,
             "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": 77,
+            "num_frames": FRAME_COUNT,
             "keyboard_cond": rounded_keyboard,
             "mouse_cond": rounded_mouse
         })
-        print(f"  Extracted validation image: {result['image_path']}")
 
-# Write JSON files (inside car_8)
-with open(os.path.join(BASE_OUTPUT_DIR, 'video2caption.json'), 'w') as f:
-    json.dump(v2c_data, f, indent=4)
+# Write Sharded JSON and merge files
+shard_size = math.ceil(len(results) / NUM_SHARDS)
 
-with open(os.path.join(BASE_OUTPUT_DIR, 'metadata.json'), 'w') as f:
-    json.dump(meta_data, f, indent=4)
+for i in range(NUM_SHARDS):
+    start_idx = i * shard_size
+    end_idx = min((i + 1) * shard_size, len(results))
+    shard_results = results[start_idx:end_idx]
+    
+    if not shard_results and i > 0:
+        continue
 
-# Write validation.json
+    # Prepare data for this shard
+    s_v2c = []
+    s_meta = []
+    for res in shard_results:
+        # video2caption format
+        s_v2c.append({
+            "path": res["path"],
+            "cap": [""],
+            "action_path": res["action_path"],
+            "resolution": {"width": 640, "height": 352},
+            "num_frames": FRAME_COUNT,
+            "fps": 25,
+            "duration": round(FRAME_COUNT / 25, 2)
+        })
+        # metadata format
+        s_meta.append({
+            "video_path": f"videos/{res['path']}",
+            "action_path": f"videos/{res['action_path']}",
+            "num_frames": FRAME_COUNT,
+            "width": 640,
+            "height": 352,
+            "episode_id": res["episode_id"]
+        })
+
+    # Filenames
+    suffix = f"_{i}" if NUM_SHARDS > 1 else ""
+    v2c_name = f"video2caption{suffix}.json"
+    meta_name = f"metadata{suffix}.json"
+    merge_name = f"merge{suffix}.txt"
+
+    # Write files
+    with open(os.path.join(BASE_OUTPUT_DIR, v2c_name), 'w') as f:
+        json.dump(s_v2c, f, indent=4)
+    with open(os.path.join(BASE_OUTPUT_DIR, meta_name), 'w') as f:
+        json.dump(s_meta, f, indent=4)
+    with open(os.path.join(BASE_OUTPUT_DIR, merge_name), 'w') as f:
+        f.write(f"{BASE_OUTPUT_DIR}/videos,{BASE_OUTPUT_DIR}/{v2c_name}\n")
+
+# Write validation.json (unchanged, single file)
 with open(os.path.join(BASE_OUTPUT_DIR, 'validation.json'), 'w') as f:
     json.dump({"data": validation_data}, f, indent=4)
 
-# Write merge.txt (inside car_8)
-with open(os.path.join(BASE_OUTPUT_DIR, 'merge.txt'), 'w') as f:
-    f.write(f"car_8/videos,car_8/video2caption.json\n")
-
 print(f"\nProcessing complete. Total processed: {len(results)}")
 print(f"Validation images: {len(validation_data)}")
-print(f"Files generated in {BASE_OUTPUT_DIR}/: videos/, validate/, video2caption.json, metadata.json, validation.json, merge.txt")
+print(f"Shards generated: {NUM_SHARDS}")
+print(f"Files generated in {BASE_OUTPUT_DIR}/: videos/, validate/, validation.json, and {NUM_SHARDS} sets of caption/meta/merge files.")
