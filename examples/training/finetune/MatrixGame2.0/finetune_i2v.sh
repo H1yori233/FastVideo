@@ -5,7 +5,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="./Matrix-Game-2.0-Foundation-Diffusers"
-DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
+DATA_DIR="car_8/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=6
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
