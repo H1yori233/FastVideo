@@ -20,7 +20,6 @@ training_args=(
   --tracker_project_name "matrixgame_ode_init_mc"
   --output_dir "checkpoints/matrixgame_ode_init"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
-  # --override_action_config "$STUDENT_ACTION_CONFIG"
   --wandb_run_name "matrixgame_ode_init"
   # --max_train_steps 6000
   --max_train_steps 800

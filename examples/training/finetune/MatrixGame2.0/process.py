@@ -22,7 +22,7 @@ FRAME_START = 11
 FRAME_COUNT = 77
 MOUSE_SHIFT = 1 # Mouse is shifted by this amount relative to keyboard
 ZERO_FIRST_FRAME = False # If True, first frame action is [0,0...] and others shift back
-NUM_SHARDS = 8 # Split output into N parts
+NUM_SHARDS = 64 # Split output into N parts
 
 # Action Mapping Configuration
 KEY_TO_INDEX = {
