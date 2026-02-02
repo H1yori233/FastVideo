@@ -25,7 +25,7 @@ BLOCK_SIZE = 12
 NUM_SHARDS = 64 # Split output into N parts
 
 # Action Mapping Configuration
-KEY_TO_INDEX = {'W': 0, 'D': 1, 'A': 2, 'S': 3}
+KEY_TO_INDEX = {'W': 0, 'S': 1, 'A': 2, 'D': 3}
 CAM_VALUE = 0.1
 VIEW_ACTION_TO_MOUSE = {
     "up": [CAM_VALUE, 0.0], "down": [-CAM_VALUE, 0.0],

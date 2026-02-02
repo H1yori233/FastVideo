@@ -27,9 +27,9 @@ NUM_SHARDS = 64 # Split output into N parts
 # Action Mapping Configuration
 KEY_TO_INDEX = {
     'W': 0,
-    'D': 1,
+    'S': 1,
     'A': 2,
-    'S': 3
+    'D': 3
 }
 
 CAM_VALUE = 0.1
