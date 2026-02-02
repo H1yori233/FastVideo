@@ -257,13 +257,12 @@ for result in tqdm(results[:8], desc="Extracting Images"):
         validation_data.append({
             "caption": str(result["episode_id"]),
             "image_path": f"../../../../{BASE_OUTPUT_DIR}/validate/{result['image_path']}",
+            "action_path": f"../../../../{BASE_OUTPUT_DIR}/videos/{result['action_path']}",
             "video_path": None,
             "num_inference_steps": 40,
             "height": 352,
             "width": 640,
-            "num_frames": FRAME_COUNT,
-            "keyboard_cond": rounded_keyboard,
-            "mouse_cond": rounded_mouse
+            "num_frames": FRAME_COUNT
         })
 
 # Write Sharded JSON and merge files
