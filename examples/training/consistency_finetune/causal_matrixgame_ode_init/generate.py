@@ -7,20 +7,22 @@ import subprocess
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import math
 
 # Configuration
 K = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
-VIDEO_SOURCE_DIR = 'mc_32k/videos'
-BASE_OUTPUT_DIR = 'mc_32k_gen'
+VIDEO_SOURCE_DIR = '../FastvideoWorldModel-MC/data/alpha1'
+BASE_OUTPUT_DIR = '../FastvideoWorldModel-MC/gen'
 GEN_DATA_DIR = os.path.join(BASE_OUTPUT_DIR, 'images')
 VALIDATE_IMG_DIR = os.path.join(BASE_OUTPUT_DIR, 'validate')
-NUM_WORKERS = 128  # Number of parallel workers
+NUM_WORKERS = 256  # Number of parallel workers
 os.makedirs(GEN_DATA_DIR, exist_ok=True)
 os.makedirs(VALIDATE_IMG_DIR, exist_ok=True)
 
 # Slicing Configuration
-FRAME_COUNT = 77
+FRAME_COUNT = 81
 BLOCK_SIZE = 12
+NUM_SHARDS = 64 # Split output into N parts
 
 # Action Mapping Configuration
 KEY_TO_INDEX = {'W': 0, 'D': 1, 'A': 2, 'S': 3}
@@ -63,6 +65,8 @@ def generate_action_sequence(count):
         
     return {'keyboard': kb_arr, 'mouse': ms_arr}
 
+import time
+
 def process_single_sample(args):
     i, src_video = args
     prefix = f"gen_{i:06d}"
@@ -72,36 +76,47 @@ def process_single_sample(args):
     img_full = os.path.join(GEN_DATA_DIR, img_rel)
     action_full = os.path.join(GEN_DATA_DIR, action_rel)
     
-    # 1. Extract first frame
+    # 1. Extract first frame with retry logic
     ffmpeg_cmd = [
         'ffmpeg', '-y', '-i', src_video,
         '-vf', "select='eq(n,0)'", '-vframes', '1',
         img_full
     ]
-    try:
-        subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-        # 2. Generate random actions
-        actions = generate_action_sequence(FRAME_COUNT)
-        np.save(action_full, actions)
-        
-        return {
-            "index": i,
-            "path": f"images/{img_rel}",
-            "action_path": f"images/{action_rel}",
-            "cap": [""],
-            "resolution": {"width": 640, "height": 352},
-            "num_frames": FRAME_COUNT,
-            "fps": 25,
-            "duration": round(FRAME_COUNT / 25, 2),
-            "keyboard": actions['keyboard'].tolist(),
-            "mouse": actions['mouse'].tolist()
-        }
-    except Exception as e:
-        print(f"Error processing sample {i}: {e}")
-        return None
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
+            # 2. Generate random actions
+            actions = generate_action_sequence(FRAME_COUNT)
+            np.save(action_full, actions)
+            
+            return {
+                "index": i,
+                "path": f"images/{img_rel}",
+                "action_path": f"images/{action_rel}",
+                "cap": [""],
+                "resolution": {"width": 640, "height": 352},
+                "num_frames": FRAME_COUNT,
+                "fps": 25,
+                "duration": round(FRAME_COUNT / 25, 2),
+                "keyboard": actions['keyboard'].tolist(),
+                "mouse": actions['mouse'].tolist()
+            }
+        except subprocess.CalledProcessError as e:
+            if attempt < max_retries - 1:
+                # Wait briefly before retrying to resolve I/O contention
+                time.sleep(random.uniform(0.5, 2.0))
+                continue
+            else:
+                print(f"Error processing sample {i} after {max_retries} attempts: {e.stderr.decode() if e.stderr else str(e)}")
+                return None
+        except Exception as e:
+            print(f"Internal error for sample {i}: {e}")
+            return None
 
 def main():
-    video_files = glob.glob(os.path.join(VIDEO_SOURCE_DIR, "*.mp4"))
+    video_files = glob.glob(os.path.join(VIDEO_SOURCE_DIR, "**", "*.mp4"), recursive=True)
     if not video_files:
         print(f"Error: No videos found in {VIDEO_SOURCE_DIR}")
         return
@@ -120,54 +135,45 @@ def main():
 
     results.sort(key=lambda x: x['index'])
 
-    # Write output files
-    v2c_path = os.path.join(BASE_OUTPUT_DIR, "video2caption.json")
-    # Store minimal data in video2caption
-    v2c_data = []
-    for res in results:
-        v2c_data.append({
-            "path": res["path"],
-            "action_path": res["action_path"],
-            "cap": res["cap"],
-            "resolution": res["resolution"],
-            "num_frames": res["num_frames"],
-            "fps": res["fps"],
-            "duration": res["duration"]
-        })
+    # Write Sharded JSON and merge files
+    shard_size = math.ceil(len(results) / NUM_SHARDS)
 
-    with open(v2c_path, 'w') as f:
-        json.dump(v2c_data, f, indent=4)
+    print(f"\nWriting {NUM_SHARDS} shards...")
+    for i in range(NUM_SHARDS):
+        start_idx = i * shard_size
+        end_idx = min((i + 1) * shard_size, len(results))
+        shard_results = results[start_idx:end_idx]
         
-    validation_data = []
-    print(f"\nCreating validation.json for first 8 episodes...")
-    for res in results[:8]:
-        # Copy image to validation dir for preview consistency
-        val_img_path = os.path.join(VALIDATE_IMG_DIR, os.path.basename(res["path"]))
-        src_img_path = os.path.join(BASE_OUTPUT_DIR, res["path"])
-        import shutil
-        shutil.copy(src_img_path, val_img_path)
+        if not shard_results and i > 0:
+            continue
 
-        validation_data.append({
-            "caption": str(res["index"]),
-            "image_path": f"../../../../{BASE_OUTPUT_DIR}/validate/{os.path.basename(res['path'])}",
-            "video_path": None,
-            "num_inference_steps": 40,
-            "height": 352,
-            "width": 640,
-            "num_frames": FRAME_COUNT,
-            "keyboard_cond": [[round(v, 2) for v in frame] for frame in res["keyboard"]],
-            "mouse_cond": [[round(v, 2) for v in frame] for frame in res["mouse"]]
-        })
+        # Prepare minimal data for video2caption
+        s_v2c = []
+        for res in shard_results:
+            s_v2c.append({
+                "path": res["path"],
+                "action_path": res["action_path"],
+                "cap": res["cap"],
+                "resolution": res["resolution"],
+                "num_frames": res["num_frames"],
+                "fps": res["fps"],
+                "duration": res["duration"]
+            })
 
-    with open(os.path.join(BASE_OUTPUT_DIR, 'validation.json'), 'w') as f:
-        json.dump({"data": validation_data}, f, indent=4)
-        
-    merge_path = os.path.join(BASE_OUTPUT_DIR, "merge.txt")
-    with open(merge_path, 'w') as f:
-        # Format: <folder_path>,<json_file_path>
-        f.write(f"{BASE_OUTPUT_DIR},{BASE_OUTPUT_DIR}/video2caption.json\n")
+        # Filenames mapping to node_id * 8 + i logic
+        suffix = f"_{i}" if NUM_SHARDS > 1 else ""
+        v2c_name = f"video2caption{suffix}.json"
+        merge_name = f"merge{suffix}.txt"
 
-    print(f"\nGeneration complete. Files saved in {BASE_OUTPUT_DIR}")
+        # Write files
+        with open(os.path.join(BASE_OUTPUT_DIR, v2c_name), 'w') as f:
+            json.dump(s_v2c, f, indent=4)
+        with open(os.path.join(BASE_OUTPUT_DIR, merge_name), 'w') as f:
+            # Format: <folder_path>,<json_file_path>
+            f.write(f"{BASE_OUTPUT_DIR},{BASE_OUTPUT_DIR}/{v2c_name}\n")
+
+    print(f"\nGeneration complete. Total: {len(results)} samples.")
+    print(f"Files saved in: {os.path.abspath(BASE_OUTPUT_DIR)}")
 
 if __name__ == "__main__":
     main()

@@ -17,8 +17,8 @@ conda activate fastvideo_kaiqin
 START_FILE=${1:-0}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
-MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-OUTPUT_BASE="mc_wasd_action/preprocessed"
+MODEL_PATH="../Matrix-Game-2.0-Foundation-MC32k-Diffusers"
+OUTPUT_BASE="../FastvideoWorldModel-MC/preprocessed"
 
 # Port range calculation
 base_port=$((29700 + NODE_ID * 100)) # Using a different port range to avoid collision with other tasks
@@ -29,7 +29,7 @@ for i in {1..8}; do
     gpu=${gpu_ids[((i-1))]}
     file_num=$((START_FILE + i - 1))
     
-    DATA_MERGE_PATH="mc_wasd_action/merge_${file_num}.txt"
+    DATA_MERGE_PATH="../FastvideoWorldModel-MC/gen/merge_${file_num}.txt"
     OUTPUT_DIR="${OUTPUT_BASE}/gpu_${gpu}_file_${file_num}"
     
     # CPU binding
