@@ -813,7 +813,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             noisy_latent = self.noise_scheduler.add_noise(
                 generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
                 timestep).detach().unflatten(0,
-                                             (1, generator_pred_video.shape[1]))
+                                             (generator_pred_video.shape[0], generator_pred_video.shape[1]))
+
+            expanded_timestep = timestep.expand(
+                noisy_latent.shape[0], noisy_latent.shape[1])
 
             image_latents = training_batch.image_latents
             noisy_model_input = torch.cat(
@@ -826,7 +829,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 hidden_states=noisy_model_input.permute(0, 2, 1, 3, 4),
                 encoder_hidden_states=None,
                 encoder_hidden_states_image=training_batch.image_embeds,
-                timestep=timestep,
+                timestep=expanded_timestep,
                 keyboard_cond=training_batch.keyboard_cond,
                 mouse_cond=training_batch.mouse_cond,
             ).permute(0, 2, 1, 3, 4)
@@ -845,7 +848,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 hidden_states=noisy_model_input.permute(0, 2, 1, 3, 4),
                 encoder_hidden_states=None,
                 encoder_hidden_states_image=training_batch.image_embeds,
-                timestep=timestep,
+                timestep=expanded_timestep,
                 keyboard_cond=training_batch.keyboard_cond,
                 mouse_cond=training_batch.mouse_cond,
             ).permute(0, 2, 1, 3, 4)
@@ -914,7 +917,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         noisy_generator_pred_video = self.noise_scheduler.add_noise(
             generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
             fake_score_timestep).unflatten(0,
-                                           (1, generator_pred_video.shape[1]))
+                                           (generator_pred_video.shape[0], generator_pred_video.shape[1]))
+
+        expanded_fake_score_timestep = fake_score_timestep.expand(
+            noisy_generator_pred_video.shape[0], noisy_generator_pred_video.shape[1])
 
         # Concat with image_latents for I2V model (expected 36 channels = 16 latent + 20 cond)
         image_latents = training_batch.image_latents
@@ -930,7 +936,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 hidden_states=noisy_model_input.permute(0, 2, 1, 3, 4),
                 encoder_hidden_states=None,
                 encoder_hidden_states_image=training_batch.image_embeds,
-                timestep=fake_score_timestep,
+                timestep=expanded_fake_score_timestep,
                 keyboard_cond=training_batch.keyboard_cond,
                 mouse_cond=training_batch.mouse_cond,
             ).permute(0, 2, 1, 3, 4)

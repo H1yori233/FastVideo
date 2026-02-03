@@ -5,7 +5,7 @@
             "image_path": "../../../../car_8/validate/000000.jpg",
             "action_path": "action/000000_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -15,7 +15,7 @@
             "image_path": "../../../../car_8/validate/000001.jpg",
             "action_path": "action/000001_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -25,7 +25,7 @@
             "image_path": "../../../../car_8/validate/000002.jpg",
             "action_path": "action/000002_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -35,7 +35,7 @@
             "image_path": "../../../../car_8/validate/000003.jpg",
             "action_path": "action/000010_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -45,7 +45,7 @@
             "image_path": "../../../../car_8/validate/000004.jpg",
             "action_path": "action/000012_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -55,7 +55,7 @@
             "image_path": "../../../../car_8/validate/000005.jpg",
             "action_path": "action/000021_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -65,7 +65,7 @@
             "image_path": "../../../../car_8/validate/000006.jpg",
             "action_path": "action/000029_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81
@@ -75,7 +75,7 @@
             "image_path": "../../../../car_8/validate/000007.jpg",
             "action_path": "action/000050_action.npy",
             "video_path": null,
-            "num_inference_steps": 40,
+            "num_inference_steps": 4,
             "height": 352,
             "width": 640,
             "num_frames": 81

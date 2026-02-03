@@ -2,8 +2,19 @@ from dataclasses import dataclass, field
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig, WanVideoConfig
 
 
+def is_blocks_exclude_action(n: str, m) -> bool:
+    # Exclude action_model from FSDP sharding
+    if "action_model" in n:
+        return False
+    # Include transformer blocks for sharding
+    return "blocks" in n and str.isdigit(n.split(".")[-1])
+
+
 @dataclass
 class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
+    # Override _fsdp_shard_conditions to exclude action_model
+    _fsdp_shard_conditions: list = field(
+        default_factory=lambda: [is_blocks_exclude_action])
     # Override param_names_mapping to remove patch_embedding transformation
     # because MatrixGame checkpoints already have patch_embedding.proj format
     param_names_mapping: dict = field(
