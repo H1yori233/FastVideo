@@ -138,15 +138,18 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long).cpu()
-        if fastvideo_args.pipeline_config.warp_denoising_step:
-            scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
-                                             torch.tensor([0],
-                                                          dtype=torch.float32)))
-            timesteps = scheduler_timesteps[1000 - timesteps]
-        timesteps = timesteps.to(get_local_torch_device())
+        if batch.timesteps is not None:
+            timesteps = batch.timesteps
+        else:
+            timesteps = torch.tensor(
+                fastvideo_args.pipeline_config.dmd_denoising_steps,
+                dtype=torch.long).cpu()
+            if fastvideo_args.pipeline_config.warp_denoising_step:
+                scheduler_timesteps = torch.cat(
+                    (self.scheduler.timesteps.cpu(),
+                     torch.tensor([0], dtype=torch.float32)))
+                timesteps = scheduler_timesteps[1000 - timesteps]
+            timesteps = timesteps.to(get_local_torch_device())
 
         boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config,
                                  'boundary_ratio', None)
@@ -241,19 +244,26 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         context_noise = getattr(fastvideo_args.pipeline_config, "context_noise",
                                 0)
 
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
             for block_idx, current_num_frames in enumerate(block_sizes):
                 ctx.block_idx = block_idx
                 ctx.start_index = start_index
-                current_latents = latents[:, :, start_index:start_index +
-                                          current_num_frames, :, :]
+                current_latents_block = latents[:, :, start_index:start_index +
+                                           current_num_frames, :, :]
 
                 action_kwargs = self._prepare_action_kwargs(
                     batch, start_index, current_num_frames)
 
-                current_latents = self._process_single_block(
-                    current_latents=current_latents,
+                # Initialize local trajectory lists for this block
+                block_trajectory_latents = []
+                block_trajectory_timesteps = []
+
+                current_latents_block = self._process_single_block(
+                    current_latents=current_latents_block,
                     batch=batch,
                     start_index=start_index,
                     current_num_frames=current_num_frames,
@@ -261,10 +271,20 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     ctx=ctx,
                     action_kwargs=action_kwargs,
                     progress_bar=progress_bar,
+                    trajectory_latents=block_trajectory_latents if batch.return_trajectory_latents else None,
+                    trajectory_timesteps=block_trajectory_timesteps if batch.return_trajectory_latents else None,
                 )
 
                 latents[:, :, start_index:start_index +
-                        current_num_frames, :, :] = current_latents
+                        current_num_frames, :, :] = current_latents_block
+
+                if batch.return_trajectory_latents:
+                    for b_lat, b_t in zip(block_trajectory_latents, block_trajectory_timesteps):
+                        # Combine with context: previous blocks are fully denoised, current is noisy
+                        full_lat = latents.clone()
+                        full_lat[:, :, start_index:start_index + current_num_frames] = b_lat
+                        trajectory_latents.append(full_lat)
+                        trajectory_timesteps.append(b_t)
 
                 # Update KV caches with clean context
                 self._update_context_cache(
@@ -283,6 +303,20 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             num_frames_to_remove = self.num_frame_per_block - 1
             if num_frames_to_remove > 0:
                 latents = latents[:, :, :-num_frames_to_remove, :, :]
+
+        # save trajectory latents if needed
+        trajectory_tensor: torch.Tensor | None = None
+        if trajectory_latents:
+            trajectory_tensor = torch.stack(trajectory_latents, dim=1)
+            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
+                                                      dim=0)
+        else:
+            trajectory_tensor = None
+            trajectory_timesteps_tensor = None
+
+        if trajectory_tensor is not None and trajectory_timesteps_tensor is not None:
+            batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
+            batch.trajectory_latents = trajectory_tensor.cpu()
 
         batch.latents = latents
         return batch
@@ -441,6 +475,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         noise_generator: Callable[[tuple, torch.dtype, int], torch.Tensor]
         | None = None,
         progress_bar: Any | None = None,
+        trajectory_latents: list[torch.Tensor] | None = None,
+        trajectory_timesteps: list[torch.Tensor] | None = None,
     ) -> torch.Tensor:
         prompt_embeds = batch.prompt_embeds
         noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
@@ -580,6 +616,11 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 current_latents = noise_latents_btchw.permute(0, 2, 1, 3, 4)
             else:
                 current_latents = pred_video_btchw.permute(0, 2, 1, 3, 4)
+
+            if trajectory_latents is not None:
+                trajectory_latents.append(current_latents.clone())
+            if trajectory_timesteps is not None:
+                trajectory_timesteps.append(t_cur)
 
             if progress_bar is not None:
                 progress_bar.update()
