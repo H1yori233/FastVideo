@@ -161,6 +161,15 @@ class ValidationDataset(IterableDataset):
                 else:
                     sample["control_video"] = load_video(control_video_path)
 
+            if sample.get("ref_video_path", None) is not None:
+                ref_video_path = sample["ref_video_path"]
+                ref_video_path = os.path.join(self.dir, ref_video_path)
+                sample["ref_video_path"] = ref_video_path
+                if not pathlib.Path(ref_video_path).is_file(
+                ) and not ref_video_path.startswith("http"):
+                    logger.warning("Reference Video file %s does not exist.",
+                                   ref_video_path)
+
             if sample.get("action_path", None) is not None:
                 action_path = sample["action_path"]
                 action_path = os.path.join(self.dir, action_path)
