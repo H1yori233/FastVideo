@@ -428,6 +428,256 @@
             "height": 352,
             "width": 640,
             "num_frames": 81
+        },
+        {
+            "caption": "39 Hold [W] + Static",
+            "image_path": "doom/000000.jpg",
+            "action_path": "action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "40 Hold [S] + Static",
+            "image_path": "doom/000001.jpg",
+            "action_path": "action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "41 Hold [A] + Static",
+            "image_path": "doom/000002.jpg",
+            "action_path": "action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "42 Hold [D] + Static",
+            "image_path": "doom/000003.jpg",
+            "action_path": "action/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "43 Hold [SA] + Static",
+            "image_path": "doom/000004.jpg",
+            "action_path": "action/000006_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "44 Hold [SD] + Static",
+            "image_path": "doom/000005.jpg",
+            "action_path": "action/000007_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "45 No Key + Hold [up]",
+            "image_path": "doom/000006.jpg",
+            "action_path": "action/000008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "46 No Key + Hold [left]",
+            "image_path": "doom/000007.jpg",
+            "action_path": "action/000010_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "47 No Key + Hold [up_right]",
+            "image_path": "doom/000000.jpg",
+            "action_path": "action/000012_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "48 No Key + Hold [down_right]",
+            "image_path": "doom/000001.jpg",
+            "action_path": "action/000014_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "49 Switch [W]->[S] + Static",
+            "image_path": "doom/000002.jpg",
+            "action_path": "action/000016_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "50 Switch [S]->[W] + Static",
+            "image_path": "doom/000003.jpg",
+            "action_path": "action/000017_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "51 Switch [A]->[D] + Static",
+            "image_path": "doom/000004.jpg",
+            "action_path": "action/000018_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "52 Switch [D]->[A] + Static",
+            "image_path": "doom/000005.jpg",
+            "action_path": "action/000019_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "53 No Key + Switch [left]->[right]",
+            "image_path": "doom/000006.jpg",
+            "action_path": "action/000024_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "54 No Key + Switch [right]->[left]",
+            "image_path": "doom/000007.jpg",
+            "action_path": "action/000025_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "55 No Key + Switch [up]->[down]",
+            "image_path": "doom/000000.jpg",
+            "action_path": "action/000026_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "56 No Key + Switch [up_right]->[up_left]",
+            "image_path": "doom/000001.jpg",
+            "action_path": "action/000029_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "57 Hold [W] + Hold [left]",
+            "image_path": "doom/000002.jpg",
+            "action_path": "action/000032_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "58 Hold [S] + Hold [right]",
+            "image_path": "doom/000003.jpg",
+            "action_path": "action/000035_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "59 Hold [WD] + Hold [down]",
+            "image_path": "doom/000039.jpg",
+            "action_path": "action/000039_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "60",
+            "image_path": "doom/000005.jpg",
+            "action_path": "action/000045_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "61 Hold [W] + Switch [up]->[down]",
+            "image_path": "doom/000006.jpg",
+            "action_path": "action/000050_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "62",
+            "image_path": "doom/000007.jpg",
+            "action_path": "action/000056_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "63 Switch [S]->[A] + Hold [up]",
+            "image_path": "doom/000000.jpg",
+            "action_path": "action/000062_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
         }
     ]
 }
