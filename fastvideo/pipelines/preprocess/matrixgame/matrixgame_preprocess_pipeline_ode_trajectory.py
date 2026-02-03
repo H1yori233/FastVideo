@@ -218,6 +218,7 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
         if "action_path" in valid_data and valid_data["action_path"]:
             keyboard_cond_list = []
             mouse_cond_list = []
+            keyboard_dim = self.get_module("transformer").config.arch_config.action_config["keyboard_dim_in"]
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
@@ -226,11 +227,11 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
                             keyboard_cond_list.append(
-                                action_dict["keyboard"].astype(np.float32))
+                                action_dict["keyboard"][:keyboard_dim].astype(np.float32))
                         if "mouse" in action_dict:
                             mouse_cond_list.append(action_dict["mouse"])
                     else:
-                        keyboard_cond_list.append(action_data.astype(np.float32))
+                        keyboard_cond_list.append(action_data[:keyboard_dim].astype(np.float32))
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:
