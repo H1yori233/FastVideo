@@ -919,6 +919,8 @@ class TrainingArgs(FastVideoArgs):
     lora_alpha: int | None = None
     lora_training: bool = False
 
+    train_action_only: bool = False
+
     # distillation args
     generator_update_interval: int = 5
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
@@ -1268,6 +1270,9 @@ class TrainingArgs(FastVideoArgs):
                             help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
+        parser.add_argument("--train-action-only",
+                            action=StoreBoolean,
+                            help="Whether to freeze DIT")
 
         # V-MoBA parameters
         parser.add_argument(

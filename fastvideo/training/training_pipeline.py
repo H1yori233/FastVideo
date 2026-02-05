@@ -90,6 +90,49 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def set_schemas(self) -> None:
         self.train_dataset_schema = pyarrow_schema_t2v
 
+    def set_trainable(self) -> None:
+        """
+        Override to only train newly added action-related parameters:
+        - condition_embedder.action_embedder: embeds action into timestep
+        - blocks.*.to_out_prope: projects PRoPE attention output
+
+        This freezes the base model (q/k/v projections, FFN, etc.) while
+        allowing the action-conditioning path to be trained.
+        """
+        train_action_only = getattr(self.fastvideo_args, "train_action_only", False)
+
+        if not train_action_only:
+            # Default behavior: train all parameters
+            super().set_trainable()
+            return
+
+        # Freeze all transformer parameters first
+        transformer = self.get_module("transformer")
+        transformer.train()
+        transformer.requires_grad_(False)
+
+        # Define which parameter name patterns to train
+        action_param_patterns = [
+            "condition_embedder.action_embedder", # Action embedding MLP
+            "to_out_prope", # PRoPE output projections in each block
+        ]
+
+        # Enable gradients for action-related parameters only
+        trainable_count = 0
+        frozen_count = 0
+        for name, param in transformer.named_parameters():
+            should_train = any(pattern in name for pattern in action_param_patterns)
+            if should_train:
+                param.requires_grad_(True)
+                trainable_count += 1
+                logger.info(f"Trainable: {name} ({param.numel()} params)")
+            else:
+                param.requires_grad_(False)
+                frozen_count += 1
+
+        logger.info(f"Action-only training: {trainable_count} trainable param groups, "
+                f"{frozen_count} frozen param groups")
+
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
         self.device = get_local_torch_device()
