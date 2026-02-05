@@ -48,19 +48,16 @@ def generate_sequence(key_seq, mouse_seq):
     keyboard_arr = np.zeros((FRAME_COUNT, 6), dtype=np.float32)
     mouse_arr = np.zeros((FRAME_COUNT, 2), dtype=np.float32)
     
-    mid_point = FRAME_COUNT // 2
-
-    # First Half
-    k_vec1 = get_multihot_vector(key_seq[0])
-    m_vec1 = get_mouse_vector(mouse_seq[0])
-    keyboard_arr[:mid_point] = k_vec1
-    mouse_arr[:mid_point] = m_vec1
-
-    # Second Half
-    k_vec2 = get_multihot_vector(key_seq[1])
-    m_vec2 = get_mouse_vector(mouse_seq[1])
-    keyboard_arr[mid_point:] = k_vec2
-    mouse_arr[mid_point:] = m_vec2
+    block_starts = [0, 1, 13, 25, 37, 49, 61, 73, 81]
+    for block_idx in range(8):
+        start = block_starts[block_idx]
+        end = block_starts[block_idx + 1]
+        
+        k_vec = get_multihot_vector(key_seq[block_idx])
+        m_vec = get_mouse_vector(mouse_seq[block_idx])
+        
+        keyboard_arr[start:end] = k_vec
+        mouse_arr[start:end] = m_vec
 
     return keyboard_arr, mouse_arr
 
@@ -77,24 +74,25 @@ def save_action(index, keyboard_arr, mouse_arr):
 
 def generate_description(key_seq, mouse_seq):
     """Generates a human-readable string for the combination."""
-    k1, k2 = key_seq
-    m1, m2 = mouse_seq
+    # Look at the first and last useful blocks to determine behavior
+    k1, k_last = key_seq[1], key_seq[7]
+    m1, m_last = mouse_seq[1], mouse_seq[7]
     
     # Format Keyboard Description
-    if not k1 and not k2:
+    if all(k == "" for k in key_seq):
         k_desc = "No Key"
-    elif k1 == k2:
+    elif all(k == k1 for k in key_seq[1:]):
         k_desc = f"Hold [{k1}]"
     else:
-        k_desc = f"Switch [{k1}]->[{k2}]"
+        k_desc = f"Switch [{k1}]->[{k_last}]"
         
     # Format Mouse Description
-    if m1 == "stop" and m2 == "stop":
+    if all(m == "stop" for m in mouse_seq):
         m_desc = "Static"
-    elif m1 == m2:
+    elif all(m == m1 for m in mouse_seq[1:]):
         m_desc = f"Hold [{m1}]"
     else:
-        m_desc = f"Switch [{m1}]->[{m2}]"
+        m_desc = f"Switch [{m1}]->[{m_last}]"
         
     return f"{k_desc} + {m_desc}"
 
@@ -108,12 +106,12 @@ readme_content = []
 # Group 1: Constant Keyboard, No Mouse (0-7)
 keys_basic = ['W', 'S', 'A', 'D', 'WA', 'WD', 'SA', 'SD']
 for k in keys_basic:
-    configs.append(((k, k), ("stop", "stop")))
+    configs.append(([k] * 8, ["stop"] * 8))
 
 # Group 2: No Keyboard, Constant Mouse (8-15)
 mouse_basic = ['up', 'down', 'left', 'right', 'up_right', 'up_left', 'down_right', 'down_left']
 for m in mouse_basic:
-    configs.append((("", ""), (m, m)))
+    configs.append(([""] * 8, [m] * 8))
 
 # Group 3: Split Keyboard, No Mouse (16-23)
 split_keys = [
@@ -123,7 +121,7 @@ split_keys = [
     ('S', 'A'), ('S', 'D')
 ]
 for k1, k2 in split_keys:
-    configs.append(((k1, k2), ("stop", "stop")))
+    configs.append(([k1] * 4 + [k2] * 4, ["stop"] * 8))
 
 # Group 4: No Keyboard, Split Mouse (24-31)
 split_mouse = [
@@ -133,13 +131,13 @@ split_mouse = [
     ('left', 'up'), ('right', 'down')
 ]
 for m1, m2 in split_mouse:
-    configs.append((("", ""), (m1, m2)))
+    configs.append(([""] * 8, [m1] * 4 + [m2] * 4))
 
 # Group 5: Constant Keyboard + Constant Mouse (32-47)
 combo_keys = ['W', 'S', 'W', 'S', 'A', 'D', 'WA', 'WD', 'W', 'S', 'W', 'S', 'A', 'D', 'WA', 'WD']
 combo_mice = ['left', 'left', 'right', 'right', 'up', 'up', 'down', 'down', 'up_left', 'up_left', 'up_right', 'up_right', 'down_left', 'down_right', 'right', 'left']
 for i in range(16):
-    configs.append(((combo_keys[i], combo_keys[i]), (combo_mice[i], combo_mice[i])))
+    configs.append(([combo_keys[i]] * 8, [combo_mice[i]] * 8))
 
 # Group 6: Constant Keyboard, Split Mouse (48-55)
 complex_1_keys = ['W'] * 8
@@ -150,18 +148,19 @@ complex_1_mice = [
     ('left', 'down'), ('right', 'down')
 ]
 for i in range(8):
-    configs.append(((complex_1_keys[i], complex_1_keys[i]), complex_1_mice[i]))
+    m1, m2 = complex_1_mice[i]
+    configs.append(([complex_1_keys[i]] * 8, [m1] * 4 + [m2] * 4))
 
 # Group 7: Split Keyboard, Constant Mouse (56-63)
-complex_2_keys = [
+complex_2_keys_list = [
     ('W', 'S'), ('S', 'W'),
     ('A', 'D'), ('D', 'A'),
     ('W', 'A'), ('W', 'D'),
     ('S', 'A'), ('S', 'D')
 ]
 complex_2_mouse = 'up' 
-for k1, k2 in complex_2_keys:
-    configs.append(((k1, k2), (complex_2_mouse, complex_2_mouse)))
+for k1, k2 in complex_2_keys_list:
+    configs.append(([k1] * 4 + [k2] * 4, [complex_2_mouse] * 8))
 
 
 # Execution
