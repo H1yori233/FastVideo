@@ -343,7 +343,17 @@ def load_model_from_full_model_state_dict(
                        unused_keys)
 
     # List of allowed parameter name patterns
-    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "to_out_prope", "action_embedder"]  # Can be extended as needed
+    ALLOWED_NEW_PARAM_PATTERNS = [
+        "gate_compress",
+        "proj_l",
+        "to_out_prope",
+        "action_embedder",
+        "patch_embedding_wancamctrl",
+        "cam_conditioner",
+        "cam_injector_layer",
+        "cam_scale_layer",
+        "cam_shift_layer",
+    ]  # Can be extended as needed
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name
                    for pattern in ALLOWED_NEW_PARAM_PATTERNS):

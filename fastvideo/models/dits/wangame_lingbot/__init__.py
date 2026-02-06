@@ -1,5 +1,5 @@
-from .model import WanGameActionTransformer3DModel
+from .model import WanLingBotTransformer3DModel
 
 __all__ = [
-    "WanGameActionTransformer3DModel",
+    "WanLingBotTransformer3DModel",
 ]

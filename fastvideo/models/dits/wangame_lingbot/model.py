@@ -172,7 +172,7 @@ class WanGameActionTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis, attention_mask=attention_mask)
+        attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -205,7 +205,7 @@ class WanGameActionTransformerBlock(nn.Module):
 
         return hidden_states
 
-class WanGameActionTransformer3DModel(BaseDiT):
+class WanLingBotTransformer3DModel(BaseDiT):
     """
     WAN Action Transformer 3D Model for video generation with action conditioning.
     
@@ -301,12 +301,12 @@ class WanGameActionTransformer3DModel(BaseDiT):
         action: torch.Tensor | None = None,
         viewmats: torch.Tensor | None = None,
         Ks: torch.Tensor | None = None,
+        c2ws_plucker_emb: torch.Tensor | None = None,
         kv_cache: list[dict] | None = None,
         crossattn_cache: list[dict] | None = None,
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
-        dit_cond_dict: dict | None = None,
         is_cache: bool = False,
         **kwargs
     ) -> torch.Tensor:
@@ -321,6 +321,7 @@ class WanGameActionTransformer3DModel(BaseDiT):
             action: Action tensor [B, T] for per-frame conditioning
             viewmats: Camera view matrices for PRoPE [B, T, 4, 4]
             Ks: Camera intrinsics for PRoPE [B, T, 3, 3]
+            c2ws_plucker_emb: Camera plucker embedding [B, C, T, H, W]
             kv_cache: KV cache for autoregressive inference (list of dicts per layer)
             crossattn_cache: Cross-attention cache for inference
             current_start: Current position for KV cache
@@ -361,8 +362,7 @@ class WanGameActionTransformer3DModel(BaseDiT):
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         c2ws_hidden_states = None
-        if dit_cond_dict is not None and "c2ws_plucker_emb" in dit_cond_dict:
-            c2ws_plucker_emb = dit_cond_dict["c2ws_plucker_emb"]
+        if c2ws_plucker_emb is not None:
             c2ws_hidden_states = self.patch_embedding_wancamctrl(
                 c2ws_plucker_emb.to(device=hidden_states.device,
                                     dtype=hidden_states.dtype))
