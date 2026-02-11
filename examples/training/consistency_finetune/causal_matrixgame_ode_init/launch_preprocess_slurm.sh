@@ -14,7 +14,7 @@ for node_id in {0..3}; do
     sbatch --job-name=mg-pre-${node_id} \
            --output=preprocess_output/mg-node-${node_id}.out \
            --error=preprocess_output/mg-node-${node_id}.err \
-           $(pwd)/FastVideo/examples/training/finetune/MatrixGame2.0/matrixgame_worker.slurm $start_file $node_id
+           $(pwd)/FastVideo_kaiqin/examples/training/consistency_finetune/causal_matrixgame_ode_init/preprocess_worker.slurm $start_file $node_id
 done
 
 echo "All 4 nodes (32 GPUs) launched successfully!"

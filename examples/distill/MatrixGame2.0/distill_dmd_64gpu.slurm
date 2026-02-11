@@ -18,6 +18,7 @@ source ~/conda/miniconda/bin/activate
 conda activate fastvideo_kaiqin
 
 # Basic Info
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export MASTER_PORT=29500
@@ -30,19 +31,19 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="../Matrix-Game-2.0-Student-MC32k-Diffusers"
-REAL_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-MC32k-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-MC32k-Diffusers"  # Critic model
+GENERATOR_MODEL_PATH="../Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
+REAL_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Teacher model
+FAKE_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Critic model
 
-DATA_DIR="../FastvideoWorldModel-MC/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation.json"
+DATA_DIR="../vizdoom/preprocessed"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_sf_mc_64gpu"
-  --output_dir "checkpoints/matrixgame_sf_mc_64gpu"
+  --tracker_project_name "matrixgame_sf_vizdoom_64gpu"
+  --output_dir "checkpoints/matrixgame_sf_vizdoom_64gpu"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
-  --wandb_run_name "0202_1510_steps1500_bs_64"
+  --wandb_run_name "0203_0100_steps1500_bs64"
   --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -84,7 +85,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 200
+  --validation_steps 100
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0"
 )
@@ -93,8 +94,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 500
-  --training_state_checkpointing_steps 500
+  --weight_only_checkpointing_steps 100
+  --training_state_checkpointing_steps 100
   --weight_decay 0.01
   --betas '0.0,0.999'
   --max_grad_norm 1.0
@@ -111,7 +112,7 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init_64gpu/checkpoint-2000/transformer"
+  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init_vizdoom/checkpoint-2000/transformer"
 )
 
 dmd_args=(

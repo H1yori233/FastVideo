@@ -18,6 +18,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
     MatrixGameCausalDMDPipeline)
+from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
@@ -59,15 +60,17 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        assert self.timestep_shift == 5.0, "flow_shift must be 5.0"
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True)
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
+        self.add_stage(stage_name="decoding_stage",
+                       stage=DecodingStage(vae=self.get_module("vae")))
+
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
-        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250],
+        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250, 0],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
@@ -181,8 +184,12 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             training_batch.mouse_cond = None
         training_batch.infos = infos
 
-        return training_batch, trajectory_latents.to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        return training_batch, trajectory_latents[:, :, :self.training_args.
+                                                  num_latent_t].to(
+                                                      device,
+                                                      dtype=torch.bfloat16
+                                                  ), trajectory_timesteps.to(
+                                                      device)
 
     def _get_timestep(self,
                       min_timestep: int,
@@ -261,6 +268,25 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
 
         # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
         B, S, num_frames, num_channels, height, width = traj_latents.shape
+        expected_action_frames = 1 + 4 * (num_frames - 1)
+        if keyboard_cond is None or mouse_cond is None:
+            raise ValueError(
+                "keyboard_cond/mouse_cond must both be provided for action-follow training. "
+                f"keyboard_cond={None if keyboard_cond is None else tuple(keyboard_cond.shape)}, "
+                f"mouse_cond={None if mouse_cond is None else tuple(mouse_cond.shape)}"
+            )
+        if keyboard_cond.shape[1] < expected_action_frames:
+            raise ValueError(
+                "keyboard_cond length is shorter than required for latent frames. "
+                f"got={keyboard_cond.shape[1]}, required>={expected_action_frames}, "
+                f"num_latent_frames={num_frames}"
+            )
+        if mouse_cond.shape[1] < expected_action_frames:
+            raise ValueError(
+                "mouse_cond length is shorter than required for latent frames. "
+                f"got={mouse_cond.shape[1]}, required>={expected_action_frames}, "
+                f"num_latent_frames={num_frames}"
+            )
 
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
@@ -490,8 +516,7 @@ class MatrixGameODEInitTrainingPipeline(TrainingPipeline):
             assert latent_key in latents_vis_dict and latents_vis_dict[
                 latent_key] is not None
             latent = latents_vis_dict[latent_key]
-            pixel_latent = self.validation_pipeline.decoding_stage.decode(
-                latent, training_args)
+            pixel_latent = self.decoding_stage.decode(latent, training_args)
 
             video = pixel_latent.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)

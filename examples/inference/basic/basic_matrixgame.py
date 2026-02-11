@@ -59,8 +59,8 @@ def main():
 
     generator.generate_video(
         prompt="",
-        # image_path=config["image_url"],
-        image_path="mc_wasd_action/validate/0.jpg",
+        image_path=config["image_url"],
+        # image_path="mc_wasd_action/validate/0.jpg",
         mouse_cond=actions["mouse"].unsqueeze(0),
         keyboard_cond=actions["keyboard"].unsqueeze(0),
         grid_sizes=grid_sizes,

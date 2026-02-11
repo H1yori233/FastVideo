@@ -1,28 +1,25 @@
 #!/bin/bash
 
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
 # MODEL_PATH="FastVideo/Matrix-Game-2.0-Foundation-Diffusers"
 # MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
-DATA_DIR="mc_wasd_action/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-STUDENT_ACTION_CONFIG="$(dirname "$0")/student_action_config.json"
-# NUM_GPUS=8
-NUM_GPUS=6
+MODEL_PATH="../Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
+DATA_DIR="../vizdoom/preprocessed"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
+NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5,6,7
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_ode_init_mc"
-  --output_dir "checkpoints/matrixgame_ode_init"
-  --override_transformer_cls_name "CausalMatrixGameWanModel"
-  --wandb_run_name "matrixgame_ode_init"
-  # --max_train_steps 6000
-  --max_train_steps 800
+  --tracker_project_name "matrixgame_ode_init_vizdoom_8gpu"
+  --output_dir "checkpoints/matrixgame_ode_init_vizdoom_8gpu"
+  --wandb_run_name "0202_2115_steps1000_bs_32"
+  --max_train_steps 1000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
@@ -37,7 +34,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 3
+  --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -57,9 +54,11 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  --log_validation
+  --log-validation
+  --log_visualization
+  --visualization-steps 100
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
+  --validation_steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )

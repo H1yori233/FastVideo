@@ -288,7 +288,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
                 # Update KV caches with clean context
                 self._update_context_cache(
-                    current_latents=current_latents,
+                    current_latents=current_latents_block,
                     batch=batch,
                     start_index=start_index,
                     current_num_frames=current_num_frames,

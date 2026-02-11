@@ -11,8 +11,8 @@ import math
 
 # Configuration
 K = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
-VIDEO_SOURCE_DIR = '../FastvideoWorldModel-MC/data/alpha1'
-BASE_OUTPUT_DIR = '../FastvideoWorldModel-MC/gen'
+VIDEO_SOURCE_DIR = '../vizdoom/data/collected_data_1k'
+BASE_OUTPUT_DIR = '../vizdoom/gen'
 GEN_DATA_DIR = os.path.join(BASE_OUTPUT_DIR, 'images')
 VALIDATE_IMG_DIR = os.path.join(BASE_OUTPUT_DIR, 'validate')
 NUM_WORKERS = 256  # Number of parallel workers

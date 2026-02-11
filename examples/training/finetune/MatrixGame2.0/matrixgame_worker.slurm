@@ -18,7 +18,7 @@ START_FILE=${1:-1}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
 MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
-OUTPUT_BASE="mc_32k/preprocessed"
+OUTPUT_BASE="traindata_0204_1600/preprocessed"
 
 # Port range calculation
 base_port=$((29500 + NODE_ID * 100))
@@ -29,8 +29,10 @@ for i in {1..8}; do
     gpu=${gpu_ids[((i-1))]}
     file_num=$((START_FILE + i - 1))
     
-    DATA_MERGE_PATH="mc_32k/merge_${file_num}.txt"
+    DATA_MERGE_PATH="traindata_0204_1600/merge_${file_num}.txt"
     OUTPUT_DIR="${OUTPUT_BASE}/gpu_${gpu}_file_${file_num}"
+    echo "DATA_MERGE_PATH: $DATA_MERGE_PATH"
+    echo "OUTPUT_DIR: $OUTPUT_DIR"
     
     # CPU binding (optional, kept from syn.slurm logic)
     start_cpu=$(( (i-1)*2 ))
@@ -39,7 +41,7 @@ for i in {1..8}; do
     echo "Starting GPU $gpu processing file merge_${file_num}.txt on port $port"
 
     CUDA_VISIBLE_DEVICES=$gpu taskset -c ${start_cpu}-${end_cpu} torchrun --nnodes=1 --nproc_per_node=1 --master_port $port \
-        fastvideo/pipelines/preprocess/v1_preprocess.py \
+        FastVideo/fastvideo/pipelines/preprocess/v1_preprocess.py \
         --model_path $MODEL_PATH \
         --data_merge_path $DATA_MERGE_PATH \
         --preprocess_video_batch_size 1 \

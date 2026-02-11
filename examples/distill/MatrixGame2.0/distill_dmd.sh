@@ -18,31 +18,30 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 # export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29503
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY=your_wandb_api_key
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 # Configs
-NUM_GPUS=4
+NUM_GPUS=64
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="Matrix-Game-2.0-Student-Diffusers"
-REAL_SCORE_MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"  # Critic model
+GENERATOR_MODEL_PATH="../Matrix-Game-2.0-Student-MC32k-Diffusers"
+REAL_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-MC32k-Diffusers"  # Teacher model
+FAKE_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-MC32k-Diffusers"  # Critic model
 
-DATA_DIR="footsies-action/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="/mnt/fast-disks/hao_lab/kaiqin/FastVideo/examples/training/consistency_finetune/causal_matrixgame_ode_init/validation.json"
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
+DATA_DIR="../FastvideoWorldModel-MC/preprocessed"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation.json"
 
 training_args=(
   --tracker_project_name matrixgame_distill_self_forcing_dmd  
   --output_dir "checkpoints/matrixgame_distill_self_forcing_dmd"
+  --wandb_run_name "0202_1010_steps2000_bs_64"
   --max_train_steps 500
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
+  --gradient_accumulation_steps 1
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -104,7 +103,7 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init/checkpoint-800/transformer"
+  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init_64gpu/checkpoint-2000/transformer"
 )
 
 dmd_args=(

@@ -1,21 +1,21 @@
 #!/bin/bash
 #SBATCH --job-name=mg-ode-64g
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=8
+#SBATCH --ntasks=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=ode_train_output/ode_%j.out
-#SBATCH --error=ode_train_output/ode_%j.err
+#SBATCH --output=finetune_i2v_output/ode_%j.out
+#SBATCH --error=finetune_i2v_output/ode_%j.err
 #SBATCH --exclusive
 
 set -e -x
 
+# Environment Setup
 source ~/conda/miniconda/bin/activate
-conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
-export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin:$PYTHONPATH"
+conda activate fastvideo_kaiqin
 
 # Basic Info
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
@@ -31,35 +31,33 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
 # Configs
-MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
-DATA_DIR="../traindata_0209_1500/mg_ode_init/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
+MODEL_PATH="../Matrix-Game-2.0-Foundation-Diffusers"
+DATA_DIR="../traindata_0203_1400/preprocessed"
+VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_humanplay.json"
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_ode_init_vizdoom"
-  --output_dir "checkpoints/matrixgame_ode_init_vizdoom_new"
-  --wandb_run_name "0210_2300_steps2000_bs_32"
-  --max_train_steps 5000
+  --tracker_project_name "matrixgame_finetune_0203"
+  --output_dir "checkpoints/matrixgame_finetune_0203"
+  --wandb_run_name "0203_1820_steps4000_bs_64"
+  --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 21
+  --num_latent_t 20
   --num_height 352
   --num_width 640
-  --num_frames 81
-  --warp_denoising_step
+  --num_frames 77
   --enable_gradient_checkpointing_type "full"
-  --override_transformer_cls_name "CausalMatrixGameWanModel"
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 32
+  --num_gpus 64
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 32
+  --hsdp_shard_dim 64
 )
 
 # Model arguments
@@ -70,15 +68,13 @@ model_args=(
 
 # Dataset arguments
 dataset_args=(
-  --data_path "$DATA_DIR" 
-  --dataloader_num_workers 4
+  --data_path "$DATA_DIR"
+  --dataloader_num_workers 1
 )
 
 # Validation arguments
 validation_args=(
   --log_validation
-  --log_visualization
-  --visualization-steps 200
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 200
   --validation_sampling_steps "50"
@@ -87,10 +83,10 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 6e-6
+  --learning_rate 2e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 500
+  --training_state_checkpointing_steps 500
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -107,7 +103,7 @@ miscellaneous_args=(
   --ema_start_step 0
 )
 
-mkdir -p ode_train_output
+mkdir -p finetune_i2v_output
 
 srun torchrun \
 --nnodes $SLURM_JOB_NUM_NODES \
@@ -115,7 +111,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/matrixgame_ode_causal_pipeline.py \
+    fastvideo/training/matrixgame_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

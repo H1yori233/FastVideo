@@ -227,11 +227,11 @@ class PreprocessPipeline_MatrixGame_ODE_Trajectory(BasePreprocessPipeline):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
                             keyboard_cond_list.append(
-                                action_dict["keyboard"][:keyboard_dim].astype(np.float32))
+                                action_dict["keyboard"][:, :keyboard_dim].astype(np.float32))
                         if "mouse" in action_dict:
                             mouse_cond_list.append(action_dict["mouse"])
                     else:
-                        keyboard_cond_list.append(action_data[:keyboard_dim].astype(np.float32))
+                        keyboard_cond_list.append(action_data[:, :keyboard_dim].astype(np.float32))
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:

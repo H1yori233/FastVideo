@@ -631,7 +631,7 @@
         },
         {
             "caption": "59 Hold [WD] + Hold [down]",
-            "image_path": "doom/000039.jpg",
+            "image_path": "doom/000004.jpg",
             "action_path": "action/000039_action.npy",
             "video_path": null,
             "num_inference_steps": 40,

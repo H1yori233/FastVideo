@@ -749,7 +749,7 @@ class ActionModule(nn.Module):
         assert tt * th * tw == x.shape[1]
         assert (
             (N_frames - 1) + self.vae_time_compression_ratio
-        ) % self.vae_time_compression_ratio == 0
+        ) % self.vae_time_compression_ratio == 0, f"N_frames: {N_frames}, vae_time_compression_ratio: {self.vae_time_compression_ratio}"
         N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
 
         # Lazy initialization of freqs on first forward pass
@@ -770,7 +770,7 @@ class ActionModule(nn.Module):
             assert (N_feats == tt and kv_cache_mouse is None) or (
                 (N_frames - 1) // self.vae_time_compression_ratio + 1
                 == start_frame + num_frame_per_block
-            )
+            ), f"N_feats {N_feats} vs tt {tt} and start_frame {start_frame} + num_frame_per_block {num_frame_per_block}"
         # For non-causal (training), we trust that the caller provides correctly shaped inputs
 
         if self.enable_mouse and mouse_condition is not None:
