@@ -734,6 +734,8 @@ class ActionModule(nn.Module):
 
         target_device = x.device
         target_dtype = x.dtype
+        
+        assert mouse_condition is not None or keyboard_condition is not None, "action condition is required"
         if mouse_condition is not None:
             mouse_condition = mouse_condition.to(
                 device=target_device, dtype=target_dtype
@@ -742,8 +744,8 @@ class ActionModule(nn.Module):
             keyboard_condition = keyboard_condition.to(
                 device=target_device, dtype=target_dtype
             )
-        else:
-            return x
+        # else:
+            # return x
 
         B, N_frames, C = keyboard_condition.shape
         assert tt * th * tw == x.shape[1]
