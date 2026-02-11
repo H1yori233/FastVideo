@@ -8,10 +8,15 @@ import torch
 #   - base_distilled_model: keyboard_dim=4
 #   - gta_distilled_model: keyboard_dim=2
 #   - templerun_distilled_model: keyboard_dim=7 (keyboard only, no mouse)
-MODEL_VARIANT = "base_distilled_model"
+MODEL_VARIANT = "zoom"
 
 # Variant-specific settings
 VARIANT_CONFIG = {
+    "zoom": {
+        "model_path": "../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers",
+        "keyboard_dim": 6,
+        "image_url": "../traindata_0209_1500/mg_ode_init/images/000005.jpg",
+    },
     "base_distilled_model": {
         "model_path": "FastVideo/Matrix-Game-2.0-Base-Diffusers",
         "keyboard_dim": 4,
@@ -51,11 +56,14 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
-    num_frames = 597
+    num_frames = 81
     actions = create_action_presets(num_frames, keyboard_dim=config["keyboard_dim"])
-    actions["keyboard"] = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * num_frames)
+    actions["keyboard"] = torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]] * num_frames)
+    # actions["keyboard"] = torch.tensor([[0.0, 1.0, 0.0, 0.0, 0.0, 0.0]] * num_frames)
+    # actions["keyboard"] = torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0, 0.0]] * num_frames)
+    # actions["keyboard"] = torch.tensor([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]] * num_frames)
     actions["mouse"] = torch.tensor([[0.0, 0.0]] * num_frames)
-    grid_sizes = torch.tensor([150, 44, 80])
+    grid_sizes = torch.tensor([21, 44, 80])
 
     generator.generate_video(
         prompt="",

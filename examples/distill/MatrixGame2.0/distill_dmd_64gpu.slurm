@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mg-sf-64g
 #SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -15,7 +15,8 @@ set -e -x
 
 # Environment Setup
 source ~/conda/miniconda/bin/activate
-conda activate fastvideo_kaiqin
+conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin:$PYTHONPATH"
 
 # Basic Info
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
@@ -31,19 +32,20 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="../Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
-REAL_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="../Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Critic model
+GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
+REAL_SCORE_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Teacher model
+FAKE_SCORE_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Critic model
 
-DATA_DIR="../vizdoom/preprocessed"
+DATA_DIR="../traindata_0209_1500/mg_ode_init/preprocessed"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
+CKPT_SAFETENSOR="checkpoints/matrixgame_ode_init_vizdoom_new/checkpoint-6000/transformer/diffusion_pytorch_model.safetensors"
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_sf_vizdoom_64gpu"
-  --output_dir "checkpoints/matrixgame_sf_vizdoom_64gpu"
+  --tracker_project_name "matrixgame_sf_vizdoom"
+  --output_dir "checkpoints/matrixgame_sf_vizdoom"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
-  --wandb_run_name "0203_0100_steps1500_bs64"
+  --wandb_run_name "0211_1300_steps1500_bs64"
   --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -58,15 +60,16 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
+  --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 64
+  --num_gpus 32
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 64
+  --hsdp_shard_dim 32
 )
 
 model_args=(
@@ -111,8 +114,7 @@ miscellaneous_args=(
   --seed 1000
   --use_ema True
   --ema_decay 0.99
-  --ema_start_step 100
-  --init_weights_from_safetensors "checkpoints/matrixgame_ode_init_vizdoom/checkpoint-2000/transformer"
+  --ema_start_step 200
 )
 
 dmd_args=(

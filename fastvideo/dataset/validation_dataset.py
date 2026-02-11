@@ -179,11 +179,24 @@ class ValidationDataset(IterableDataset):
                 try:
                     action_data = np.load(action_path, allow_pickle=True)
                     num_frames = sample["num_frames"]
-                    if action_data.dtype == object: action_data = action_data.item()
+                    if action_data.dtype == object: 
+                        action_data = action_data.item()
                     if isinstance(action_data, dict):
+                        assert len(action_data["keyboard"]) >= num_frames, (
+                            f"keyboard action length {len(action_data['keyboard'])} "
+                            f"is smaller than required num_frames {num_frames} "
+                            f"for {action_path}.")
+                        assert len(action_data["mouse"]) >= num_frames, (
+                            f"mouse action length {len(action_data['mouse'])} "
+                            f"is smaller than required num_frames {num_frames} "
+                            f"for {action_path}.")
                         sample["keyboard_cond"] = action_data["keyboard"][:num_frames]
                         sample["mouse_cond"] = action_data["mouse"][:num_frames]
                     else:
+                        assert len(action_data) >= num_frames, (
+                            f"action length {len(action_data)} "
+                            f"is smaller than required num_frames {num_frames} "
+                            f"for {action_path}.")
                         sample["keyboard_cond"] = action_data[:num_frames]
                 except Exception as e:
                     logger.error("Error loading action file %s: %s",

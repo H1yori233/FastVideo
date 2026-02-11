@@ -39,8 +39,8 @@ VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgam
 training_args=(
   --tracker_project_name "matrixgame_ode_init_vizdoom"
   --output_dir "checkpoints/matrixgame_ode_init_vizdoom_new"
-  --wandb_run_name "0210_2300_steps2000_bs_32"
-  --max_train_steps 5000
+  --wandb_run_name "0211_0300_steps2000_bs_32"
+  --max_train_steps 10000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -78,9 +78,9 @@ dataset_args=(
 validation_args=(
   --log_validation
   --log_visualization
-  --visualization-steps 200
+  --visualization-steps 500
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 200
+  --validation_steps 500
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -89,8 +89,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 2000
+  --training_state_checkpointing_steps 2000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
