@@ -1398,17 +1398,19 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
-                
-                video_filename = os.path.join(
-                    training_args.output_dir,
-                    f"{latent_key}_step_{step}.mp4"
-                )
+
+                video_filename = os.path.join(training_args.output_dir,
+                                              f"{latent_key}_step_{step}.mp4")
                 # [B, T, C, H, W] to [H, W, C]
-                video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                video_frames = [
+                    np.transpose(video[0, t], (1, 2, 0))
+                    for t in range(video.shape[1])
+                ]
                 imageio.mimsave(video_filename, video_frames, fps=24)
-                
+
                 video_artifact = self.tracker.video(
-                    video_filename, caption=latent_key)  # change to 16 for Wan2.1
+                    video_filename,
+                    caption=latent_key)  # change to 16 for Wan2.1
                 if video_artifact is not None:
                     tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references
@@ -1440,17 +1442,19 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
-                
-                video_filename = os.path.join(
-                    training_args.output_dir,
-                    f"{latent_key}_step_{step}.mp4"
-                )
+
+                video_filename = os.path.join(training_args.output_dir,
+                                              f"{latent_key}_step_{step}.mp4")
                 # [B, T, C, H, W] to [H, W, C]
-                video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                video_frames = [
+                    np.transpose(video[0, t], (1, 2, 0))
+                    for t in range(video.shape[1])
+                ]
                 imageio.mimsave(video_filename, video_frames, fps=24)
-                
+
                 video_artifact = self.tracker.video(
-                    video_filename, caption=latent_key)  # change to 16 for Wan2.1
+                    video_filename,
+                    caption=latent_key)  # change to 16 for Wan2.1
                 if video_artifact is not None:
                     tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references

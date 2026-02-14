@@ -190,13 +190,16 @@ def _update_kv_cache_and_attend(
         )
         local_start_index = local_end_index - num_new_tokens
 
-    # Store new k, v in cache
-    if store_first_only:
-        kv_cache["k"][:, local_start_index:local_end_index] = k[:1]
-        kv_cache["v"][:, local_start_index:local_end_index] = v[:1]
-    else:
-        kv_cache["k"][:, local_start_index:local_end_index] = k
-        kv_cache["v"][:, local_start_index:local_end_index] = v
+    # Cache is inference state and should stay outside autograd graph.
+    k_to_store = k[:1] if store_first_only else k
+    v_to_store = v[:1] if store_first_only else v
+    with torch.no_grad():
+        kv_cache["k"][:, local_start_index:local_end_index] = (
+            k_to_store.detach().contiguous()
+        )
+        kv_cache["v"][:, local_start_index:local_end_index] = (
+            v_to_store.detach().contiguous()
+        )
 
     # Retrieve from cache and perform attention
     cache_start = max(0, local_end_index - max_attention_size)
@@ -210,8 +213,9 @@ def _update_kv_cache_and_attend(
     attn = attn_layer(q, cached_k, cached_v)
 
     # Update indices
-    kv_cache["global_end_index"].fill_(current_end)
-    kv_cache["local_end_index"].fill_(local_end_index)
+    with torch.no_grad():
+        kv_cache["global_end_index"].fill_(current_end)
+        kv_cache["local_end_index"].fill_(local_end_index)
 
     return attn
 
@@ -508,9 +512,12 @@ class ActionModule(nn.Module):
         group_mouse = self.mouse_mlp(group_mouse)
         # qkv
         mouse_qkv, _ = self.t_qkv(group_mouse)
-        q, k, v = rearrange(
+        mouse_qkv = rearrange(
             mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
-        )  # BHW F H C
+        )
+        q = mouse_qkv.select(0, 0).contiguous()
+        k = mouse_qkv.select(0, 1).contiguous()
+        v = mouse_qkv.select(0, 2).contiguous()  # BHW F H C
         q = self.img_attn_q_norm(q).to(v)
         k = self.img_attn_k_norm(k).to(v)
         # rope embd
@@ -620,9 +627,11 @@ class ActionModule(nn.Module):
         q = mouse_q.view(B, L, self.heads_num, D)
 
         B, L, KHD = keyboard_kv.shape
-        k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(
+        keyboard_kv = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(
             2, 0, 1, 3, 4
         )
+        k = keyboard_kv.select(0, 0).contiguous()
+        v = keyboard_kv.select(0, 1).contiguous()
 
         # Compute cu_squlens and max_seqlen for flash attention
         # qk norm
@@ -745,7 +754,7 @@ class ActionModule(nn.Module):
                 device=target_device, dtype=target_dtype
             )
         # else:
-            # return x
+            return x
 
         B, N_frames, C = keyboard_condition.shape
         assert tt * th * tw == x.shape[1]

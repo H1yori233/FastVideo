@@ -172,11 +172,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         return flow_matching_loss, log_dict
 
     def _build_distill_input_kwargs(
-            self, noise_input: torch.Tensor, timestep: torch.Tensor,
+            self,
+            noise_input: torch.Tensor,
+            timestep: torch.Tensor,
             text_dict: dict[str, torch.Tensor] | None,
             training_batch: TrainingBatch,
             target_model: torch.nn.Module | None = None) -> TrainingBatch:
-        return super()._build_distill_input_kwargs(noise_input, timestep, text_dict, training_batch)
+        return super()._build_distill_input_kwargs(noise_input, timestep,
+                                                   text_dict, training_batch)
 
     def _generator_multi_step_simulation_forward(
             self,
@@ -881,17 +884,19 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.cpu().float()
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
-                    
+
                     video_filename = os.path.join(
                         training_args.output_dir,
-                        f"dmd_{latent_key}_step_{step}.mp4"
-                    )
+                        f"dmd_{latent_key}_step_{step}.mp4")
                     # [B, T, C, H, W] to [H, W, C]
-                    video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                    video_frames = [
+                        np.transpose(video[0, t], (1, 2, 0))
+                        for t in range(video.shape[1])
+                    ]
                     imageio.mimsave(video_filename, video_frames, fps=24)
-                    
-                    video_artifact = self.tracker.video(video_filename,
-                                                        caption=f"dmd_{latent_key}")
+
+                    video_artifact = self.tracker.video(
+                        video_filename, caption=f"dmd_{latent_key}")
                     if video_artifact is not None:
                         tracker_loss_dict[f"dmd_{latent_key}"] = video_artifact
                     del video, latents
@@ -934,17 +939,19 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.cpu().float()
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
-                    
+
                     video_filename = os.path.join(
                         training_args.output_dir,
-                        f"critic_{latent_key}_step_{step}.mp4"
-                    )
+                        f"critic_{latent_key}_step_{step}.mp4")
                     # [B, T, C, H, W] to [H, W, C]
-                    video_frames = [np.transpose(video[0, t], (1, 2, 0)) for t in range(video.shape[1])]
+                    video_frames = [
+                        np.transpose(video[0, t], (1, 2, 0))
+                        for t in range(video.shape[1])
+                    ]
                     imageio.mimsave(video_filename, video_frames, fps=24)
-                    
-                    video_artifact = self.tracker.video(video_filename,
-                                                        caption=f"critic_{latent_key}")
+
+                    video_artifact = self.tracker.video(
+                        video_filename, caption=f"critic_{latent_key}")
                     if video_artifact is not None:
                         tracker_loss_dict[
                             f"critic_{latent_key}"] = video_artifact

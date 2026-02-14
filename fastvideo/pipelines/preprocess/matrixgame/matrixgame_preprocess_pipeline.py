@@ -135,8 +135,9 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
-                    if isinstance(action_data,
-                                  np.ndarray) and action_data.dtype == np.dtype('O'):
+                    if isinstance(
+                            action_data,
+                            np.ndarray) and action_data.dtype == np.dtype('O'):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
                             keyboard_cond_list.append(
@@ -144,7 +145,8 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                         if "mouse" in action_dict:
                             mouse_cond_list.append(action_dict["mouse"])
                     else:
-                        keyboard_cond_list.append(action_data.astype(np.float32))
+                        keyboard_cond_list.append(action_data.astype(
+                            np.float32))
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:

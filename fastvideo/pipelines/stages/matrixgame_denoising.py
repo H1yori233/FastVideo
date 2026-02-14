@@ -253,7 +253,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 ctx.block_idx = block_idx
                 ctx.start_index = start_index
                 current_latents_block = latents[:, :, start_index:start_index +
-                                           current_num_frames, :, :]
+                                                current_num_frames, :, :]
 
                 action_kwargs = self._prepare_action_kwargs(
                     batch, start_index, current_num_frames)
@@ -271,18 +271,22 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     ctx=ctx,
                     action_kwargs=action_kwargs,
                     progress_bar=progress_bar,
-                    trajectory_latents=block_trajectory_latents if batch.return_trajectory_latents else None,
-                    trajectory_timesteps=block_trajectory_timesteps if batch.return_trajectory_latents else None,
+                    trajectory_latents=block_trajectory_latents
+                    if batch.return_trajectory_latents else None,
+                    trajectory_timesteps=block_trajectory_timesteps
+                    if batch.return_trajectory_latents else None,
                 )
 
                 latents[:, :, start_index:start_index +
                         current_num_frames, :, :] = current_latents_block
 
                 if batch.return_trajectory_latents:
-                    for b_lat, b_t in zip(block_trajectory_latents, block_trajectory_timesteps):
+                    for b_lat, b_t in zip(block_trajectory_latents,
+                                          block_trajectory_timesteps, strict=False):
                         # Combine with context: previous blocks are fully denoised, current is noisy
                         full_lat = latents.clone()
-                        full_lat[:, :, start_index:start_index + current_num_frames] = b_lat
+                        full_lat[:, :, start_index:start_index +
+                                 current_num_frames] = b_lat
                         trajectory_latents.append(full_lat)
                         trajectory_timesteps.append(b_t)
 
