@@ -893,6 +893,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         np.transpose(video[0, t], (1, 2, 0))
                         for t in range(video.shape[1])
                     ]
+                    video_frames = self._post_process_validation_frames(
+                        video_frames, training_batch)
                     imageio.mimsave(video_filename, video_frames, fps=24)
 
                     video_artifact = self.tracker.video(
@@ -948,6 +950,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         np.transpose(video[0, t], (1, 2, 0))
                         for t in range(video.shape[1])
                     ]
+                    video_frames = self._post_process_validation_frames(
+                        video_frames, training_batch)
                     imageio.mimsave(video_filename, video_frames, fps=24)
 
                     video_artifact = self.tracker.video(

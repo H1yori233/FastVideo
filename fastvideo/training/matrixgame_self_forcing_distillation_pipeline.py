@@ -3,6 +3,7 @@ import sys
 from copy import deepcopy
 from typing import Any
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -355,7 +356,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     kv_cache_keyboard=self.kv_cache_keyboard,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
-                    start_frame=current_start_frame)
+                    start_frame=current_start_frame,
+                    num_frame_per_block=1)
             current_start_frame += 1
 
         # Step 3: Temporal denoising loop
@@ -419,7 +421,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            start_frame=current_start_frame).permute(
+                            start_frame=current_start_frame,
+                            num_frame_per_block=current_num_frames).permute(
                                 0, 2, 1, 3, 4)
 
                         denoised_pred = pred_noise_to_pred_video(
@@ -470,7 +473,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                 crossattn_cache=self.crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
-                                start_frame=current_start_frame).permute(
+                                start_frame=current_start_frame,
+                                num_frame_per_block=current_num_frames).permute(
                                     0, 2, 1, 3, 4)
                     else:
                         training_batch_temp = self._build_distill_input_kwargs(
@@ -500,7 +504,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             crossattn_cache=self.crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            start_frame=current_start_frame).permute(
+                            start_frame=current_start_frame,
+                            num_frame_per_block=current_num_frames).permute(
                                 0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
@@ -550,7 +555,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     kv_cache_keyboard=self.kv_cache_keyboard,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
-                    start_frame=current_start_frame)
+                    start_frame=current_start_frame,
+                    num_frame_per_block=current_num_frames)
 
             # Step 3.4: update the start and end frame indices
             current_start_frame += current_num_frames
@@ -739,40 +745,30 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         image_latents = training_batch.image_latents.to(
             get_local_torch_device(), dtype=torch.bfloat16)
 
-        if image_latents.shape[1] > 16:
-            logger.info("DEBUG: image_latents shape is already prepared")
-            # Already prepared
-            return training_batch
-
-        temporal_compression_ratio = 4
-        num_frames = (self.training_args.num_latent_t -
-                      1) * temporal_compression_ratio + 1
-        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
-        mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
-                                   latent_width)
-        mask_lat_size[:, :, 1:] = 0
-
-        first_frame_mask = mask_lat_size[:, :, :1]
-        first_frame_mask = torch.repeat_interleave(
-            first_frame_mask, dim=2, repeats=temporal_compression_ratio)
-        mask_lat_size = torch.cat([first_frame_mask, mask_lat_size[:, :, 1:]],
-                                  dim=2)
-        mask_lat_size = mask_lat_size.view(batch_size, -1,
-                                           temporal_compression_ratio,
-                                           latent_height, latent_width)
-        mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(
-            image_latents.device).to(dtype=torch.bfloat16)
-
-        image_latents = torch.cat([mask_lat_size, image_latents], dim=1)
-        training_batch.image_latents = image_latents
+        # cond_concat = [mask(4), image_latent(16)] with 20 channels.
+        expected_cond_channels = 20
+        if image_latents.shape[1] != expected_cond_channels:
+            raise ValueError(
+                "Unexpected first_frame_latent channels, "
+                "Expected {expected_cond_channels} (cond_concat), got {image_latents.shape[1]}."
+            )
 
         if self.sp_world_size > 1:
-            image_latents = rearrange(image_latents,
-                                      "b c (n t) h w -> b c n t h w",
-                                      n=self.sp_world_size).contiguous()
-            image_latents = image_latents[:, :, self.rank_in_sp_group, :, :, :]
-            training_batch.image_latents = image_latents
+            total_frames = image_latents.shape[2]
+            # Split cond latents to local SP shard only when tensor is still global.
+            if total_frames == self.training_args.num_latent_t:
+                if total_frames % self.sp_world_size != 0:
+                    raise ValueError(
+                        "image_latents temporal dim is not divisible by SP world size: "
+                        f"frames={total_frames}, sp_world_size={self.sp_world_size}"
+                    )
+                image_latents = rearrange(image_latents,
+                                          "b c (n t) h w -> b c n t h w",
+                                          n=self.sp_world_size).contiguous()
+                image_latents = image_latents[:, :, self.rank_in_sp_group, :, :,
+                                              :]
+
+        training_batch.image_latents = image_latents
 
         return training_batch
 
@@ -866,6 +862,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 timestep=expanded_timestep,
                 keyboard_cond=training_batch.keyboard_cond,
                 mouse_cond=training_batch.mouse_cond,
+                num_frame_per_block=self.num_frame_per_block,
             ).permute(0, 2, 1, 3, 4)
 
             faker_score_pred_video = pred_noise_to_pred_video(
@@ -885,6 +882,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 timestep=expanded_timestep,
                 keyboard_cond=training_batch.keyboard_cond,
                 mouse_cond=training_batch.mouse_cond,
+                num_frame_per_block=self.num_frame_per_block,
             ).permute(0, 2, 1, 3, 4)
 
             real_score_pred_video = pred_noise_to_pred_video(
@@ -976,6 +974,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 timestep=expanded_fake_score_timestep,
                 keyboard_cond=training_batch.keyboard_cond,
                 mouse_cond=training_batch.mouse_cond,
+                num_frame_per_block=self.num_frame_per_block,
             ).permute(0, 2, 1, 3, 4)
 
         target = fake_score_noise - generator_pred_video
@@ -1037,6 +1036,56 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             batch.mouse_cond = mouse_cond
 
         return batch
+
+    def _post_process_validation_frames(
+            self, frames: list[np.ndarray],
+            batch: ForwardBatch) -> list[np.ndarray]:
+        """Apply action overlay to validation frames for WanGame.
+        
+        Draws keyboard (WASD) and mouse (pitch/yaw) indicators on the video frames.
+        """
+        # Check if action data is available
+        keyboard_cond = getattr(batch, 'keyboard_cond', None)
+        mouse_cond = getattr(batch, 'mouse_cond', None)
+
+        if keyboard_cond is None and mouse_cond is None:
+            return frames
+
+        # Import overlay functions
+        from fastvideo.models.dits.matrixgame.utils import (draw_keys_on_frame,
+                                                            draw_mouse_on_frame)
+
+        # Convert tensors to numpy if needed (bfloat16 -> float32 -> numpy)
+        if keyboard_cond is not None:
+            keyboard_cond = keyboard_cond.squeeze(
+                0).cpu().float().numpy()  # (T, 6)
+        if mouse_cond is not None:
+            mouse_cond = mouse_cond.squeeze(0).cpu().float().numpy()  # (T, 2)
+
+        # MatrixGame convention: keyboard [W, S, A, D, left, right], mouse [Pitch, Yaw]
+        key_names = ["W", "S", "A", "D", "left", "right"]
+
+        processed_frames = []
+        for frame_idx, frame in enumerate(frames):
+            frame = np.ascontiguousarray(frame.copy())
+
+            # Draw keyboard overlay
+            if keyboard_cond is not None and frame_idx < len(keyboard_cond):
+                keys = {
+                    key_names[i]: bool(keyboard_cond[frame_idx, i])
+                    for i in range(min(len(key_names), keyboard_cond.shape[1]))
+                }
+                draw_keys_on_frame(frame, keys, mode='universal')
+
+            # Draw mouse overlay
+            if mouse_cond is not None and frame_idx < len(mouse_cond):
+                pitch = float(mouse_cond[frame_idx, 0])
+                yaw = float(mouse_cond[frame_idx, 1])
+                draw_mouse_on_frame(frame, pitch, yaw)
+
+            processed_frames.append(frame)
+
+        return processed_frames
 
 
 def main(args) -> None:

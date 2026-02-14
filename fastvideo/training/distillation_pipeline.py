@@ -1286,6 +1286,7 @@ class DistillationPipeline(TrainingPipeline):
                         x = torchvision.utils.make_grid(x, nrow=6)
                         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                         frames.append((x * 255).numpy().astype(np.uint8))
+                    frames = self._post_process_validation_frames(frames, batch)
                     videos.append(frames)
 
                 return videos, captions
@@ -1406,6 +1407,8 @@ class DistillationPipeline(TrainingPipeline):
                     np.transpose(video[0, t], (1, 2, 0))
                     for t in range(video.shape[1])
                 ]
+                video_frames = self._post_process_validation_frames(
+                    video_frames, training_batch)
                 imageio.mimsave(video_filename, video_frames, fps=24)
 
                 video_artifact = self.tracker.video(
@@ -1450,6 +1453,8 @@ class DistillationPipeline(TrainingPipeline):
                     np.transpose(video[0, t], (1, 2, 0))
                     for t in range(video.shape[1])
                 ]
+                video_frames = self._post_process_validation_frames(
+                    video_frames, training_batch)
                 imageio.mimsave(video_filename, video_frames, fps=24)
 
                 video_artifact = self.tracker.video(
