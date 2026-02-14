@@ -293,6 +293,8 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     - num_evicted_tokens
                     - sink_tokens
                 )
+                kv_cache["k"] = kv_cache["k"].detach()
+                kv_cache["v"] = kv_cache["v"].detach()
                 kv_cache["k"][
                     :, sink_tokens : sink_tokens + num_rolled_tokens
                 ] = kv_cache["k"][

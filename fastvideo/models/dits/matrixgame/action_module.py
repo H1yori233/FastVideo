@@ -143,6 +143,9 @@ def _update_kv_cache_and_attend(
     kv_cache_size = kv_cache["k"].shape[1]
     num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
 
+    kv_cache["k"] = kv_cache["k"].detach()
+    kv_cache["v"] = kv_cache["v"].detach()
+
     # Check if we need to evict tokens
     if (current_end > kv_cache["global_end_index"].item()) and (
         num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size
@@ -190,16 +193,10 @@ def _update_kv_cache_and_attend(
         )
         local_start_index = local_end_index - num_new_tokens
 
-    # Cache is inference state and should stay outside autograd graph.
     k_to_store = k[:1] if store_first_only else k
     v_to_store = v[:1] if store_first_only else v
-    with torch.no_grad():
-        kv_cache["k"][:, local_start_index:local_end_index] = (
-            k_to_store.detach().contiguous()
-        )
-        kv_cache["v"][:, local_start_index:local_end_index] = (
-            v_to_store.detach().contiguous()
-        )
+    kv_cache["k"][:, local_start_index:local_end_index] = k_to_store
+    kv_cache["v"][:, local_start_index:local_end_index] = v_to_store
 
     # Retrieve from cache and perform attention
     cache_start = max(0, local_end_index - max_attention_size)

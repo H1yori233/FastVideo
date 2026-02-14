@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=mg-sf-64g
+#SBATCH --job-name=debug-mg-sf
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -31,13 +31,17 @@ export TOKENIZERS_PARALLELISM=false
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
+RUN_NAME=$(date +"%m%d_%H%M")
+echo "RUN_NAME: $RUN_NAME"
+
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
+# GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
+GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"
 REAL_SCORE_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Critic model
 
 DATA_DIR="../traindata_0209_1500/mg_ode_init/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
+VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
 CKPT_SAFETENSOR="checkpoints/matrixgame_ode_init_vizdoom_new/checkpoint-6000/transformer/diffusion_pytorch_model.safetensors"
 
 # Training arguments
@@ -45,8 +49,8 @@ training_args=(
   --tracker_project_name "matrixgame_sf_vizdoom"
   --output_dir "checkpoints/matrixgame_sf_vizdoom"
   --override_transformer_cls_name "CausalMatrixGameWanModel"
-  --wandb_run_name "0211_1300_steps1500_bs64"
-  --max_train_steps 1500
+  --wandb_run_name "${RUN_NAME}_test"
+  --max_train_steps 5
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -65,11 +69,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 32
+  --num_gpus 8
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 32
+  --hsdp_shard_dim 8
 )
 
 model_args=(
@@ -87,8 +91,10 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --log_visualization
+  --visualization-steps 1
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 1
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0"
 )
