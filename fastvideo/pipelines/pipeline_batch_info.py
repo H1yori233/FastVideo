@@ -250,7 +250,6 @@ class TrainingBatch:
     # matrixgame
     keyboard_cond: torch.Tensor | None = None
     mouse_cond: torch.Tensor | None = None
-    keyboard_cond_student: torch.Tensor | None = None
 
     # ODE trajectory supervision
     trajectory_latents: torch.Tensor | None = None

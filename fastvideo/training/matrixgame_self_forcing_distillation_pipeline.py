@@ -722,11 +722,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             keyboard_cond_full = keyboard_cond.to(get_local_torch_device(),
                                                   dtype=torch.bfloat16)
             training_batch.keyboard_cond = keyboard_cond_full  # For Teacher/Critic (dim=6)
-            # training_batch.keyboard_cond_student = keyboard_cond_full[:, :, :6]
-            training_batch.keyboard_cond_student = keyboard_cond_full  # For Student (dim=6)
         else:
             training_batch.keyboard_cond = None
-            training_batch.keyboard_cond_student = None
         if mouse_cond is not None and mouse_cond.numel() > 0:
             training_batch.mouse_cond = mouse_cond.to(get_local_torch_device(),
                                                       dtype=torch.bfloat16)
@@ -794,12 +791,12 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         if frame_end is not None:
             action_frame_end = (frame_end -
                                 1) * vae_temporal_compression_ratio + 1
-            keyboard_cond_sliced = training_batch.keyboard_cond_student[:, :
-                                                                        action_frame_end, :] if training_batch.keyboard_cond_student is not None else None
+            keyboard_cond_sliced = training_batch.keyboard_cond[:, :
+                                                                action_frame_end, :] if training_batch.keyboard_cond is not None else None
             mouse_cond_sliced = training_batch.mouse_cond[:, :
                                                           action_frame_end, :] if training_batch.mouse_cond is not None else None
         else:
-            keyboard_cond_sliced = training_batch.keyboard_cond_student
+            keyboard_cond_sliced = training_batch.keyboard_cond
             mouse_cond_sliced = training_batch.mouse_cond
 
         noisy_model_input = torch.cat(
