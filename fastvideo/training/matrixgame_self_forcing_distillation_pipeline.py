@@ -789,11 +789,11 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 timestep).detach().unflatten(0, (generator_pred_video.shape[0],
                                                  generator_pred_video.shape[1]))
 
-            expanded_timestep = timestep.expand(noisy_latent.shape[0],
-                                                noisy_latent.shape[1])
+            # Non-causal models expect 1D timestep (batch_size,)
+            critic_timestep = timestep.expand(noisy_latent.shape[0])
 
             self._build_distill_input_kwargs(
-                noisy_latent, expanded_timestep, None, training_batch
+                noisy_latent, critic_timestep, None, training_batch
             )
 
             # fake_score_transformer forward
@@ -883,9 +883,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 0,
                 (generator_pred_video.shape[0], generator_pred_video.shape[1]))
 
+        # Non-causal critic expects 1D timestep (batch_size,), not 2D (batch_size, num_frames).
         expanded_fake_score_timestep = fake_score_timestep.expand(
-            noisy_generator_pred_video.shape[0],
-            noisy_generator_pred_video.shape[1])
+            noisy_generator_pred_video.shape[0])
 
         self._build_distill_input_kwargs(
             noisy_generator_pred_video, expanded_fake_score_timestep, None, training_batch

@@ -36,7 +36,7 @@ echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
 # GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
-GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"
+GENERATOR_MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
 REAL_SCORE_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"  # Critic model
 
@@ -48,7 +48,7 @@ CKPT_SAFETENSOR="checkpoints/matrixgame_ode_init_vizdoom_new/checkpoint-6000/tra
 training_args=(
   --tracker_project_name "matrixgame_sf_vizdoom"
   --output_dir "checkpoints/matrixgame_sf_vizdoom"
-  --override_transformer_cls_name "CausalMatrixGameWanModel"
+  # --override_transformer_cls_name "CausalMatrixGameWanModel"
   --wandb_run_name "${RUN_NAME}_test"
   --max_train_steps 5
   --train_batch_size 1
@@ -64,7 +64,7 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
-  --init_weights_from_safetensors $CKPT_SAFETENSOR
+  # --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
 # Parallel arguments
