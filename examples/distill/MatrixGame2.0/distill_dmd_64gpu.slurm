@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=debug-mg-sf
+#SBATCH --job-name=mg-sf
 #SBATCH --partition=main
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -49,11 +49,11 @@ training_args=(
   --tracker_project_name "matrixgame_sf_vizdoom"
   --output_dir "checkpoints/matrixgame_sf_vizdoom"
   # --override_transformer_cls_name "CausalMatrixGameWanModel"
-  --wandb_run_name "${RUN_NAME}_test"
-  --max_train_steps 5
+  --wandb_run_name "${RUN_NAME}_bs32"
+  --max_train_steps 3000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 2
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -69,11 +69,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 8
+  --num_gpus 16
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 8
+  --hsdp_shard_dim 16
 )
 
 model_args=(
@@ -92,9 +92,9 @@ dataset_args=(
 validation_args=(
   --log_validation
   --log_visualization
-  --visualization-steps 1
+  --visualization-steps 100
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 1
+  --validation_steps 100
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0"
 )

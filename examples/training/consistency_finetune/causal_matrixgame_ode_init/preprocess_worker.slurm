@@ -18,8 +18,9 @@ export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin:$PYTHONPATH"
 START_FILE=${1:-1}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
-MODEL_PATH="./mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"
-OUTPUT_BASE="traindata_0209_1500/mg_ode_init/preprocessed"
+# MODEL_PATH="./mg_models/Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"
+MODEL_PATH="./mg_models/Matrix-Game-2.0-Foundation-MC32k-Diffusers"
+OUTPUT_BASE="traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_mg"
 
 # Port range calculation
 base_port=$((29500 + NODE_ID * 100))
@@ -30,7 +31,7 @@ for i in {1..8}; do
     gpu=${gpu_ids[((i-1))]}
     file_num=$((START_FILE + i - 1))
     
-    DATA_MERGE_PATH="traindata_0209_1500/mg_ode_init/merge_${file_num}.txt"
+    DATA_MERGE_PATH="traindata_0222_0030/ode_init_mc_with_mouse/merge_${file_num}.txt"
     OUTPUT_DIR="${OUTPUT_BASE}/gpu_${gpu}_file_${file_num}"
     echo "DATA_MERGE_PATH: $DATA_MERGE_PATH"
     echo "OUTPUT_DIR: $OUTPUT_DIR"

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mg-ode-64g
+#SBATCH --job-name=mg-ode
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -30,17 +30,20 @@ export TOKENIZERS_PARALLELISM=false
 echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
+RUN_NAME=$(date +"%m%d_%H%M")
+echo "RUN_NAME: $RUN_NAME"
+
 # Configs
-MODEL_PATH="../mg_models/Matrix-Game-2.0-Student-VizDoom1k-1000steps-Diffusers"
-DATA_DIR="../traindata_0209_1500/mg_ode_init/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_vizdoom.json"
+MODEL_PATH="../mg_models/Matrix-Game-2.0-Foundation-MC32k-Diffusers"
+DATA_DIR="../traindata_0222_0030/ode_init_mc_with_mouse/preprocessed_mg"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_matrixgame_ode_init/validation_mc.json"
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_ode_init_vizdoom"
-  --output_dir "checkpoints/matrixgame_ode_init_vizdoom_new"
-  --wandb_run_name "0211_0300_steps2000_bs_32"
-  --max_train_steps 10000
+  --tracker_project_name "matrixgame_ode_init_mc"
+  --output_dir "checkpoints/matrixgame_ode_init_${RUN_NAME}"
+  --wandb_run_name "${RUN_NAME}_bs_32"
+  --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -78,9 +81,9 @@ dataset_args=(
 validation_args=(
   --log_validation
   --log_visualization
-  --visualization-steps 500
+  --visualization-steps 250
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 500
+  --validation_steps 250
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -89,8 +92,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 2000
-  --training_state_checkpointing_steps 2000
+  --weight_only_checkpointing_steps 1000
+  --training_state_checkpointing_steps 1000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
