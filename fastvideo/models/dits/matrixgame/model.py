@@ -96,29 +96,22 @@ class MatrixGameTimeImageEmbedding(nn.Module):
 
 
 class MatrixGameCrossAttention(WanSelfAttention):
-    def forward(self, x, context, context_lens=None, crossattn_cache=None):
+    def forward(self, x, context, context_lens=None, context_kv=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C] - typically 257 image tokens
             context_lens(Tensor): Shape [B]
-            crossattn_cache(dict): Optional cache for k/v during inference
+            context_kv(tuple[Tensor, Tensor]): Optional pre-computed (k, v) tensors
         """
         b, n, d = x.size(0), self.num_heads, self.head_dim
 
-        # compute query, key, value
+        # compute query
         q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
 
-        if crossattn_cache is not None:
-            if not crossattn_cache["is_init"]:
-                crossattn_cache["is_init"] = True
-                k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
-                v = self.to_v(context)[0].view(b, -1, n, d)
-                crossattn_cache["k"] = k
-                crossattn_cache["v"] = v
-            else:
-                k = crossattn_cache["k"]
-                v = crossattn_cache["v"]
+        if context_kv is not None:
+            # Use pre-computed K/V
+            k, v = context_kv
         else:
             k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
             v = self.to_v(context)[0].view(b, -1, n, d)

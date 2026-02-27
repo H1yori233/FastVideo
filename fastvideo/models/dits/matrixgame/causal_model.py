@@ -49,6 +49,75 @@ from .model import MatrixGameCrossAttention
 logger = init_logger(__name__)
 
 
+class KVCache:
+    """Sliding-window KV cache with immutable update semantics.
+    """
+
+
+    def __init__(
+        self,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        length: int = 0,
+        window_size: int | None = None,
+    ):
+        self.k = k
+        self.v = v
+        self.length = length
+        self.window_size = window_size if window_size is not None else k.shape[1]
+
+    @staticmethod
+    def create(
+        batch_size: int,
+        window_size: int,
+        num_heads: int,
+        head_dim: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> "KVCache":
+        k = torch.zeros(
+            [batch_size, window_size, num_heads, head_dim],
+            dtype=dtype,
+            device=device,
+        )
+        v = torch.zeros(
+            [batch_size, window_size, num_heads, head_dim],
+            dtype=dtype,
+            device=device,
+        )
+        return KVCache(k, v, length=0, window_size=window_size)
+
+    def update(self, new_k: torch.Tensor, new_v: torch.Tensor) -> "KVCache":
+        k = torch.cat([self.k[:, :self.length], new_k], dim=1)[:, -self.window_size:]
+        v = torch.cat([self.v[:, :self.length], new_v], dim=1)[:, -self.window_size:]
+        new_length = min(self.length + new_k.shape[1], self.window_size)
+        return KVCache(k, v, length=new_length, window_size=self.window_size)
+
+    def get_attended_kv(
+        self,
+        max_attn_size: int | None = None,
+        repeat_factor: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if max_attn_size is not None:
+            start = max(0, self.length - max_attn_size)
+        else:
+            start = max(0, self.window_size - self.length)
+
+        cached_k = self.k[:, start:start + min(self.length, max_attn_size or self.length)]
+        cached_v = self.v[:, start:start + min(self.length, max_attn_size or self.length)]
+
+        if repeat_factor is not None:
+            cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
+            cached_v = cached_v.repeat(repeat_factor, 1, 1, 1)
+
+        return cached_k, cached_v
+
+    def reset(self) -> None:
+        self.k.zero_()
+        self.v.zero_()
+        self.length = 0
+
+
 def causal_rope_apply(
     x: torch.Tensor, grid_sizes: tuple[int, int, int], freqs: torch.Tensor, start_frame: int = 0
 ):
@@ -179,7 +248,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
         grid_sizes: tuple[int, int, int],
-        kv_cache: dict | None = None,
+        kv_cache: KVCache | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
     ):
@@ -258,97 +327,26 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 block_mask=block_mask,
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            # Calculate frame_seqlen correctly from grid_sizes (single frame token count)
-            if grid_sizes is not None:
-                frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
-            else:
-                # Fallback: assume q.shape[1] is single frame (shouldn't happen in causal mode)
-                frame_seqlen = q.shape[1]
-                logger.warning(
-                    "grid_sizes not provided, using q.shape[1] as frame_seqlen"
-                )
-
-            current_end = current_start + roped_query.shape[1]
-            sink_tokens = self.sink_size * frame_seqlen
-
-            # Compute max_attention_size dynamically based on actual frame_seqlen
+            frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
             max_attention_size = (
                 15 * frame_seqlen
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
 
-            kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
-            global_end_index = (
-                int(kv_cache["global_end_index"].item())
-                if isinstance(kv_cache["global_end_index"], torch.Tensor)
-                else int(kv_cache["global_end_index"])
-            )
-            local_end_index_prev = (
-                int(kv_cache["local_end_index"].item())
-                if isinstance(kv_cache["local_end_index"], torch.Tensor)
-                else int(kv_cache["local_end_index"])
-            )
+            # Update cache with new roped keys and raw values
+            kv_cache = kv_cache.update(roped_key, v)
 
-            if (current_end > global_end_index) and (
-                num_new_tokens + local_end_index_prev > kv_cache_size
-            ):
-                num_evicted_tokens = (
-                    num_new_tokens + local_end_index_prev - kv_cache_size
-                )
-                num_rolled_tokens = (
-                    local_end_index_prev - num_evicted_tokens - sink_tokens
-                )
-                kv_cache["k"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["k"][
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                kv_cache["v"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["v"][
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                local_end_index = (
-                    local_end_index_prev
-                    + current_end - global_end_index - num_evicted_tokens
-                )
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-            else:
-                local_end_index = (
-                    local_end_index_prev + current_end - global_end_index
-                )
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-
-            kv_start = max(0, local_end_index - max_attention_size)
-            k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
-            v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+            # Retrieve windowed K/V for attention
+            k_for_attn, v_for_attn = kv_cache.get_attended_kv(
+                max_attn_size=max_attention_size
+            )
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
                 k_for_attn.transpose(1, 2),
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
-
-            if isinstance(kv_cache["global_end_index"], torch.Tensor):
-                kv_cache["global_end_index"].fill_(current_end)
-            else:
-                kv_cache["global_end_index"] = current_end
-            if isinstance(kv_cache["local_end_index"], torch.Tensor):
-                kv_cache["local_end_index"].fill_(local_end_index)
-            else:
-                kv_cache["local_end_index"] = local_end_index
 
         return x
 
@@ -475,10 +473,10 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         block_mask_keyboard: BlockMask | None = None,
         num_frame_per_block: int = 1,
         use_rope_keyboard: bool = True,
-        kv_cache: dict | None = None,
-        kv_cache_mouse: dict | None = None,
-        kv_cache_keyboard: dict | None = None,
-        crossattn_cache: dict | None = None,
+        kv_cache: KVCache | None = None,
+        kv_cache_mouse: KVCache | None = None,
+        kv_cache_keyboard: KVCache | None = None,
+        context_kv: tuple[torch.Tensor, torch.Tensor] | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
     ) -> torch.Tensor:
@@ -543,7 +541,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             norm_hidden_states,
             context=encoder_hidden_states,
             context_lens=None,
-            crossattn_cache=crossattn_cache,
+            context_kv=context_kv,
         )
         # residual connection
         hidden_states = hidden_states + attn_output
@@ -882,10 +880,10 @@ class CausalMatrixGameWanModel(BaseDiT):
         | None = None,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
-        kv_cache: dict = None,
-        kv_cache_mouse: dict = None,
-        kv_cache_keyboard: dict = None,
-        crossattn_cache: dict = None,
+        kv_cache: list[KVCache] | None = None,
+        kv_cache_mouse: list[KVCache] | None = None,
+        kv_cache_keyboard: list[KVCache] | None = None,
+        context_kv: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
@@ -1069,8 +1067,8 @@ class CausalMatrixGameWanModel(BaseDiT):
             kv_cache_mouse = [None] * len(self.blocks)
         if kv_cache_keyboard is None:
             kv_cache_keyboard = [None] * len(self.blocks)
-        if crossattn_cache is None:
-            crossattn_cache = [None] * len(self.blocks)
+        if context_kv is None:
+            context_kv = [None] * len(self.blocks)
 
         for block_index, block in enumerate(self.blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -1083,8 +1081,8 @@ class CausalMatrixGameWanModel(BaseDiT):
                         "kv_cache_keyboard": kv_cache_keyboard[block_index]
                         if kv_cache_keyboard
                         else None,
-                        "crossattn_cache": crossattn_cache[block_index]
-                        if crossattn_cache
+                        "context_kv": context_kv[block_index]
+                        if context_kv
                         else None,
                         "current_start": current_start,
                         "cache_start": cache_start,
@@ -1104,8 +1102,8 @@ class CausalMatrixGameWanModel(BaseDiT):
                         "kv_cache_keyboard": kv_cache_keyboard[block_index]
                         if kv_cache_keyboard
                         else None,
-                        "crossattn_cache": crossattn_cache[block_index]
-                        if crossattn_cache
+                        "context_kv": context_kv[block_index]
+                        if context_kv
                         else None,
                         "current_start": current_start,
                         "cache_start": cache_start,
@@ -1139,6 +1137,26 @@ class CausalMatrixGameWanModel(BaseDiT):
         hidden_states = self.unpatchify(hidden_states, grid_sizes)
 
         return hidden_states
+
+    def precompute_context_kv(
+        self,
+        encoder_hidden_states: torch.Tensor,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Pre-compute cross-attention K/V for all blocks.
+
+        Since the CLIP visual context is static across all frames,
+        we compute K/V once and pass them as constants to each block.
+        """
+        context_kv_list = []
+        b = encoder_hidden_states.shape[0]
+        for block in self.blocks:
+            cross_attn = block.attn2
+            n = cross_attn.num_heads
+            d = cross_attn.head_dim
+            k = cross_attn.norm_k(cross_attn.to_k(encoder_hidden_states)[0]).view(b, -1, n, d)
+            v = cross_attn.to_v(encoder_hidden_states)[0].view(b, -1, n, d)
+            context_kv_list.append((k, v))
+        return context_kv_list
 
     def _forward_train(
         self,
@@ -1319,23 +1337,17 @@ class CausalMatrixGameWanModel(BaseDiT):
             num_frame_per_block=self.num_frame_per_block,
         )
 
-        # Initialize kv_cache, kv_cache_mouse, kv_cache_keyboard, crossattn_cache if not provided
+        # Initialize kv_cache, kv_cache_mouse, kv_cache_keyboard if not provided
         kv_cache = kwargs.pop("kv_cache", [None] * len(self.blocks))
         kv_cache_mouse = kwargs.pop("kv_cache_mouse", [None] * len(self.blocks))
         kv_cache_keyboard = kwargs.pop(
             "kv_cache_keyboard", [None] * len(self.blocks)
         )
-        crossattn_cache = kwargs.pop(
-            "crossattn_cache", [None] * len(self.blocks)
+        context_kv = kwargs.pop(
+            "context_kv", [None] * len(self.blocks)
         )
 
         for i, block in enumerate(self.blocks):
-            block_crossattn_cache = None
-            if crossattn_cache is not None:
-                if crossattn_cache[i] is None:
-                    crossattn_cache[i] = {"is_init": False}
-                block_crossattn_cache = crossattn_cache[i]
-
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = self._gradient_checkpointing_func(
                     block,
@@ -1346,7 +1358,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                     kv_cache=kv_cache[i],
                     kv_cache_mouse=kv_cache_mouse[i],
                     kv_cache_keyboard=kv_cache_keyboard[i],
-                    crossattn_cache=block_crossattn_cache,
+                    context_kv=context_kv[i],
                     block_mask=self.block_mask,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
@@ -1365,7 +1377,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                     kv_cache=kv_cache[i],
                     kv_cache_mouse=kv_cache_mouse[i],
                     kv_cache_keyboard=kv_cache_keyboard[i],
-                    crossattn_cache=block_crossattn_cache,
+                    context_kv=context_kv[i],
                     block_mask=self.block_mask,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
