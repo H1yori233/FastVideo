@@ -15,7 +15,7 @@ from fastvideo.layers.rotary_embedding import (
     _apply_rotary_emb,
 )
 from fastvideo.platforms import AttentionBackendEnum
-from .causal_model import KVCache
+from .kv_cache import KVCache
 
 
 DISABLE_COMPILE = False

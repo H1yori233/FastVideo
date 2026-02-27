@@ -14,7 +14,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-from fastvideo.models.dits.matrixgame.causal_model import KVCache
+from fastvideo.models.dits.matrixgame.kv_cache import KVCache
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
