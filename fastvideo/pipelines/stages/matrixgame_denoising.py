@@ -14,6 +14,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.models.dits.matrixgame.kv_cache import KVCache
 
 try:
     from fastvideo.attention.backends.video_sparse_attn import (
@@ -35,10 +36,10 @@ class BlockProcessingContext:
     block_idx: int
     start_index: int
 
-    kv_cache1: list[dict[Any, Any]]
-    kv_cache2: list[dict[Any, Any]] | None
-    kv_cache_mouse: list[dict[Any, Any]] | None
-    kv_cache_keyboard: list[dict[Any, Any]] | None
+    kv_cache1: list[KVCache]
+    kv_cache2: list[KVCache] | None
+    kv_cache_mouse: list[KVCache] | None
+    kv_cache_keyboard: list[KVCache] | Non
     crossattn_cache: list[dict[Any, Any]]
 
     timesteps: torch.Tensor
@@ -296,8 +297,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         return action_kwargs
 
     def _initialize_kv_cache(self, batch_size: int, dtype: torch.dtype,
-                             device: torch.device) -> list[dict]:
-        kv_cache = []
+                             device: torch.device) -> list[KVCache]:
         num_attention_heads = self.transformer.num_attention_heads
         attention_head_dim = getattr(
             self.transformer, 'attention_head_dim',
@@ -307,35 +307,20 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         else:
             kv_cache_size = self.frame_seq_length * self.sliding_window_num_frames
 
-        for _ in range(self.num_transformer_blocks):
-            kv_cache.append({
-                "k":
-                torch.zeros([
-                    batch_size, kv_cache_size, num_attention_heads,
-                    attention_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([
-                    batch_size, kv_cache_size, num_attention_heads,
-                    attention_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
-
-        return kv_cache
+        return [
+            KVCache.create(
+                batch_size=batch_size,
+                window_size=kv_cache_size,
+                num_heads=num_attention_heads,
+                head_dim=attention_head_dim,
+                dtype=dtype,
+                device=device,
+            )
+            for _ in range(self.num_transformer_blocks)
+        ]
 
     def _initialize_action_kv_cache(self, batch_size: int, dtype: torch.dtype,
                                     device: torch.device):
-        kv_cache_mouse = []
-        kv_cache_keyboard = []
-
         action_heads = self.action_config.get('heads_num', 16)
         mouse_head_dim = self.action_config.get('mouse_hidden_dim',
                                                 1024) // action_heads
@@ -347,45 +332,28 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         else:
             kv_cache_size = 15
 
-        for _ in range(self.num_transformer_blocks):
-            kv_cache_keyboard.append({
-                "k":
-                torch.zeros([
-                    batch_size, kv_cache_size, action_heads, keyboard_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([
-                    batch_size, kv_cache_size, action_heads, keyboard_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
-            kv_cache_mouse.append({
-                "k":
-                torch.zeros([
-                    batch_size * self.frame_seq_length, kv_cache_size,
-                    action_heads, mouse_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "v":
-                torch.zeros([
-                    batch_size * self.frame_seq_length, kv_cache_size,
-                    action_heads, mouse_head_dim
-                ],
-                            dtype=dtype,
-                            device=device),
-                "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-                "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
-            })
+        kv_cache_keyboard = [
+            KVCache.create(
+                batch_size=batch_size,
+                window_size=kv_cache_size,
+                num_heads=action_heads,
+                head_dim=keyboard_head_dim,
+                dtype=dtype,
+                device=device,
+            )
+            for _ in range(self.num_transformer_blocks)
+        ]
+        kv_cache_mouse = [
+            KVCache.create(
+                batch_size=batch_size * self.frame_seq_length,
+                window_size=kv_cache_size,
+                num_heads=action_heads,
+                head_dim=mouse_head_dim,
+                dtype=dtype,
+                device=device,
+            )
+            for _ in range(self.num_transformer_blocks)
+        ]
 
         return kv_cache_mouse, kv_cache_keyboard
 

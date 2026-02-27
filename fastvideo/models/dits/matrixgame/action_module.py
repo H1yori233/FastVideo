@@ -15,6 +15,7 @@ from fastvideo.layers.rotary_embedding import (
     _apply_rotary_emb,
 )
 from fastvideo.platforms import AttentionBackendEnum
+from .kv_cache import KVCache
 
 
 DISABLE_COMPILE = False
@@ -89,144 +90,6 @@ def _padding_q_k_v(tensor: torch.Tensor, padded_length: int) -> torch.Tensor:
         ],
         dim=1,
     )
-
-
-def _update_kv_cache_and_attend(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    kv_cache: dict[str, torch.Tensor | int],
-    attn_layer: LocalAttention,
-    start_frame: int,
-    num_frame_per_block: int,
-    local_attn_size: int,
-    *,
-    use_k_for_num_tokens: bool = False,
-    store_first_only: bool = False,
-    repeat_factor: int | None = None,
-) -> torch.Tensor:
-    """
-    Update KV cache with new tokens and perform attention with cached values.
-
-    Args:
-        q: Query tensor
-        k: Key tensor
-        v: Value tensor
-        kv_cache: Dictionary containing cache tensors and indices
-        attn_layer: Attention layer to use
-        start_frame: Starting frame index
-        num_frame_per_block: Number of frames per block
-        local_attn_size: Maximum attention window size
-        use_k_for_num_tokens: If True, use k.shape[1] for num_new_tokens, else use q.shape[1]
-        store_first_only: If True, only store k[:1] and v[:1] in cache (for keyboard with rope)
-        repeat_factor: If provided, repeat cached k,v by this factor when retrieving (for keyboard with rope)
-
-    Returns:
-        Attention output tensor
-    """
-    current_start = start_frame
-    current_end = current_start + (
-        k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    )
-
-    assert (
-        k.shape[1] if use_k_for_num_tokens else q.shape[1]
-    ) == num_frame_per_block
-
-    sink_size = 0
-    max_attention_size = local_attn_size
-    sink_tokens = sink_size * 1
-    kv_cache_size = kv_cache["k"].shape[1]
-    num_new_tokens = k.shape[1] if use_k_for_num_tokens else q.shape[1]
-
-    original_global_end_index = (
-        int(kv_cache["global_end_index"].item())
-        if isinstance(kv_cache["global_end_index"], torch.Tensor)
-        else int(kv_cache["global_end_index"])
-    )
-    original_local_end_index = (
-        int(kv_cache["local_end_index"].item())
-        if isinstance(kv_cache["local_end_index"], torch.Tensor)
-        else int(kv_cache["local_end_index"])
-    )
-
-    # Check if we need to evict tokens
-    if (current_end > original_global_end_index) and (
-        num_new_tokens + original_local_end_index > kv_cache_size
-    ):
-        num_evicted_tokens = (
-            num_new_tokens + original_local_end_index - kv_cache_size
-        )
-        num_rolled_tokens = (
-            original_local_end_index
-            - num_evicted_tokens
-            - sink_tokens
-        )
-        # Roll k cache
-        kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-            kv_cache["k"][
-                :,
-                sink_tokens + num_evicted_tokens : sink_tokens
-                + num_evicted_tokens
-                + num_rolled_tokens,
-            ].clone()
-        )
-        # Roll v cache
-        kv_cache["v"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
-            kv_cache["v"][
-                :,
-                sink_tokens + num_evicted_tokens : sink_tokens
-                + num_evicted_tokens
-                + num_rolled_tokens,
-            ].clone()
-        )
-        # Calculate indices with eviction adjustment
-        local_end_index = (
-            original_local_end_index
-            + current_end
-            - original_global_end_index
-            - num_evicted_tokens
-        )
-        local_start_index = local_end_index - num_new_tokens
-    else:
-        # Calculate indices without eviction
-        local_end_index = (
-            original_local_end_index
-            + current_end
-            - original_global_end_index
-        )
-        local_start_index = local_end_index - num_new_tokens
-
-    # Store new k, v in cache
-    if store_first_only:
-        kv_cache["k"][:, local_start_index:local_end_index] = k[:1]
-        kv_cache["v"][:, local_start_index:local_end_index] = v[:1]
-    else:
-        kv_cache["k"][:, local_start_index:local_end_index] = k
-        kv_cache["v"][:, local_start_index:local_end_index] = v
-
-    # Retrieve from cache and perform attention
-    cache_start = max(0, local_end_index - max_attention_size)
-    cached_k = kv_cache["k"][:, cache_start:local_end_index]
-    cached_v = kv_cache["v"][:, cache_start:local_end_index]
-
-    if repeat_factor is not None:
-        cached_k = cached_k.repeat(repeat_factor, 1, 1, 1)
-        cached_v = cached_v.repeat(repeat_factor, 1, 1, 1)
-
-    attn = attn_layer(q, cached_k, cached_v)
-
-    # Update indices
-    if isinstance(kv_cache["global_end_index"], torch.Tensor):
-        kv_cache["global_end_index"].fill_(current_end)
-    else:
-        kv_cache["global_end_index"] = current_end
-    if isinstance(kv_cache["local_end_index"], torch.Tensor):
-        kv_cache["local_end_index"].fill_(local_end_index)
-    else:
-        kv_cache["local_end_index"] = local_end_index
-
-    return attn
 
 
 class ActionModule(nn.Module):
@@ -453,13 +316,62 @@ class ActionModule(nn.Module):
             // self.patch_size[0] :
         ]
 
+    def _action_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        *,
+        is_causal: bool,
+        kv_cache: KVCache | None,
+        block_mask: BlockMask | None,
+        attn_layer: LocalAttention,
+        store_first_only: bool = False,
+        repeat_factor: int | None = None,
+    ) -> torch.Tensor:
+        """Unified attention dispatch for action module (mouse/keyboard).
+
+        Handles three cases:
+        1. Non-causal (training): direct attention via attn_layer
+        2. Causal without cache (initial inference): flex_attention with block mask
+        3. Causal with cache (streaming inference): KVCache update + SDPA
+        """
+        if not is_causal:
+            return attn_layer(q, k, v)
+
+        if kv_cache is None:
+            # Initial inference: use flex_attention with block mask
+            padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
+            padded_q = _padding_q_k_v(q, padded_length)
+            padded_k = _padding_q_k_v(k, padded_length)
+            padded_v = _padding_q_k_v(v, padded_length)
+            attn = flex_attention(
+                query=padded_q.transpose(2, 1),  # [B, H, L, D]
+                key=padded_k.transpose(2, 1),
+                value=padded_v.transpose(2, 1),
+                block_mask=block_mask,
+            )[:, :, :-padded_length].transpose(2, 1)
+            return attn
+        else:
+            # Streaming inference: update cache and attend
+            if store_first_only:
+                kv_cache.update(k[:1], v[:1])
+            else:
+                kv_cache.update(k, v)
+
+            cached_k, cached_v = kv_cache.get_attended_kv(
+                max_attn_size=self.local_attn_size,
+                repeat_factor=repeat_factor,
+            )
+            return attn_layer(q, cached_k, cached_v)
+
     def _forward_mouse(
         self,
         hidden_states: torch.Tensor,
         mouse_condition: torch.Tensor,
         *,
         is_causal: bool,
-        kv_cache_mouse: dict[str, torch.Tensor] | None,
+        kv_cache_mouse: KVCache | None,
         pad_t: int,
         num_frame_per_block: int,
         block_mask_mouse: BlockMask | None,
@@ -504,9 +416,7 @@ class ActionModule(nn.Module):
             ]
 
         group_mouse = torch.stack(group_mouse, dim=1)
-        actual_num_frames = group_mouse.shape[
-            1
-        ]  # Use actual stacked frame count
+        actual_num_frames = group_mouse.shape[1]
 
         S = th * tw
         group_mouse = group_mouse.unsqueeze(-1).expand(
@@ -522,48 +432,22 @@ class ActionModule(nn.Module):
         mouse_qkv, _ = self.t_qkv(group_mouse)
         q, k, v = rearrange(
             mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
-        )  # BHW F H C
+        )
         q = self.img_attn_q_norm(q).to(v)
         k = self.img_attn_k_norm(k).to(v)
-        # rope embd
-
-        # freqs_cis = (self.freqs_cos, self.freqs_sin)
-
+        # rope embed
         q, k = _apply_rotary_emb_qk(
             q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
         )
-        ## TODO: adding cache here
-        if is_causal:
-            if kv_cache_mouse is None:
-                assert (
-                    q.shape[0] == k.shape[0] and q.shape[0] % S == 0
-                )  # == 880, f"{q.shape[0]},{k.shape[0]}"
-                padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                padded_q = _padding_q_k_v(q, padded_length)
-                padded_k = _padding_q_k_v(k, padded_length)
-                padded_v = _padding_q_k_v(v, padded_length)
-                attn = flex_attention(
-                    query=padded_q.transpose(2, 1),  # after: B, HW, F, C
-                    key=padded_k.transpose(2, 1),
-                    value=padded_v.transpose(2, 1),
-                    block_mask=block_mask_mouse,
-                )[:, :, :-padded_length].transpose(2, 1)
-            else:
-                attn = _update_kv_cache_and_attend(
-                    q,
-                    k,
-                    v,
-                    kv_cache_mouse,
-                    self.mouse_attn_layer,
-                    start_frame,
-                    num_frame_per_block,
-                    self.local_attn_size,
-                    use_k_for_num_tokens=False,
-                )
-        else:
-            attn = self.mouse_attn_layer(q, k, v)
-        # Compute cu_squlens and max_seqlen for flash attention
-        # qk norm
+
+        attn = self._action_attention(
+            q, k, v,
+            is_causal=is_causal,
+            kv_cache=kv_cache_mouse,
+            block_mask=block_mask_mouse,
+            attn_layer=self.mouse_attn_layer,
+        )
+
         attn = rearrange(attn, "(b S) T h d -> b (T S) (h d)", b=B)
         attn, _ = self.proj_mouse(attn)
         return attn
@@ -574,8 +458,7 @@ class ActionModule(nn.Module):
         keyboard_condition: torch.Tensor,
         *,
         is_causal: bool,
-        use_rope_keyboard: bool,
-        kv_cache_keyboard: dict[str, torch.Tensor] | None,
+        kv_cache_keyboard: KVCache | None,
         pad_t: int,
         num_frame_per_block: int,
         block_mask_keyboard: BlockMask | None,
@@ -596,7 +479,7 @@ class ActionModule(nn.Module):
                 * (N_feats - num_frame_per_block - self.windows_size)
                 + pad_t :,
                 :,
-            ]  # keyboard_condition[:, self.vae_time_compression_ratio*(start_frame - self.windows_size) + pad_t:start_frame * self.vae_time_compression_ratio + pad_t,:]
+            ]
             keyboard_condition = self.keyboard_embed(keyboard_condition)
             group_keyboard = [
                 keyboard_condition[
@@ -636,87 +519,33 @@ class ActionModule(nn.Module):
             2, 0, 1, 3, 4
         )
 
-        # Compute cu_squlens and max_seqlen for flash attention
-        # qk norm
-
         q = self.key_attn_q_norm(q).to(v)
         k = self.key_attn_k_norm(k).to(v)
         S = th * tw
-        # assert S == 880
-        # position embed
-        if use_rope_keyboard:
-            B, TS, H, D = q.shape
-            T_ = TS // S
-            q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
-            q, k = _apply_rotary_emb_qk(
-                q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
-            )
 
-            k = k.repeat_interleave(S, dim=0)
-            v = v.repeat_interleave(S, dim=0)
+        # Position embed with RoPE
+        # official repo asserts use_rope_keyboard==True
+        B, TS, H, D = q.shape
+        T_ = TS // S
+        q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
+        q, k = _apply_rotary_emb_qk(
+            q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
+        )
 
-            if is_causal:
-                if kv_cache_keyboard is None:
-                    assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0
+        k = k.repeat_interleave(S, dim=0)
+        v = v.repeat_interleave(S, dim=0)
 
-                    padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                    padded_q = _padding_q_k_v(q, padded_length)
-                    padded_k = _padding_q_k_v(k, padded_length)
-                    padded_v = _padding_q_k_v(v, padded_length)
-                    attn = flex_attention(
-                        query=padded_q.transpose(2, 1),  # after: B, HW, F, C
-                        key=padded_k.transpose(2, 1),
-                        value=padded_v.transpose(2, 1),
-                        block_mask=block_mask_keyboard,
-                    )[:, :, :-padded_length].transpose(2, 1)
-                else:
-                    assert (
-                        k.shape[0] == S
-                    )  # BS == 1 or the cache should not be saved/ load method should be modified
-                    attn = _update_kv_cache_and_attend(
-                        q,
-                        k,
-                        v,
-                        kv_cache_keyboard,
-                        self.keyboard_attn_layer,
-                        start_frame,
-                        num_frame_per_block,
-                        self.local_attn_size,
-                        use_k_for_num_tokens=True,
-                        store_first_only=True,
-                        repeat_factor=S,
-                    )
-            else:
-                attn = self.keyboard_attn_layer(q, k, v)
-            attn = rearrange(attn, "(B S) T H D -> B (T S) (H D)", S=S)
-        else:
-            if is_causal:
-                if kv_cache_keyboard is None:
-                    padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                    padded_q = _padding_q_k_v(q, padded_length)
-                    padded_k = _padding_q_k_v(k, padded_length)
-                    padded_v = _padding_q_k_v(v, padded_length)
-                    attn = flex_attention(
-                        query=padded_q.transpose(2, 1),  # after: B, HW, F, C
-                        key=padded_k.transpose(2, 1),
-                        value=padded_v.transpose(2, 1),
-                        block_mask=block_mask_keyboard,
-                    )[:, :, :-padded_length].transpose(2, 1)
-                else:
-                    attn = _update_kv_cache_and_attend(
-                        q,
-                        k,
-                        v,
-                        kv_cache_keyboard,
-                        self.keyboard_attn_layer,
-                        start_frame,
-                        num_frame_per_block,
-                        self.local_attn_size,
-                        use_k_for_num_tokens=True,
-                    )
-            else:
-                attn = self.keyboard_attn_layer(q, k, v)
-            attn = rearrange(attn, "B L H D -> B L (H D)")
+        attn = self._action_attention(
+            q, k, v,
+            is_causal=is_causal,
+            kv_cache=kv_cache_keyboard,
+            block_mask=block_mask_keyboard,
+            attn_layer=self.keyboard_attn_layer,
+            store_first_only=True,
+            repeat_factor=S,
+        )
+
+        attn = rearrange(attn, "(B S) T H D -> B (T S) (H D)", S=S)
         attn, _ = self.proj_keyboard(attn)
         return attn
 
@@ -731,8 +560,8 @@ class ActionModule(nn.Module):
         block_mask_mouse: BlockMask | None = None,
         block_mask_keyboard: BlockMask | None = None,
         is_causal: bool = False,
-        kv_cache_mouse: dict[str, torch.Tensor] | None = None,
-        kv_cache_keyboard: dict[str, torch.Tensor] | None = None,
+        kv_cache_mouse: KVCache | None = None,
+        kv_cache_keyboard: KVCache | None = None,
         start_frame: int = 0,
         use_rope_keyboard: bool = True,
         num_frame_per_block: int = 3,
@@ -822,7 +651,6 @@ class ActionModule(nn.Module):
                 hidden_states,
                 keyboard_condition,
                 is_causal=is_causal,
-                use_rope_keyboard=use_rope_keyboard,
                 kv_cache_keyboard=kv_cache_keyboard,
                 pad_t=pad_t,
                 num_frame_per_block=num_frame_per_block,

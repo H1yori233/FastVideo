@@ -45,6 +45,7 @@ from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
 from .model import MatrixGameCrossAttention
+from .kv_cache import KVCache
 
 logger = init_logger(__name__)
 
@@ -179,7 +180,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
         grid_sizes: tuple[int, int, int],
-        kv_cache: dict | None = None,
+        kv_cache: KVCache | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
     ):
@@ -258,97 +259,26 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 block_mask=block_mask,
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            # Calculate frame_seqlen correctly from grid_sizes (single frame token count)
-            if grid_sizes is not None:
-                frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
-            else:
-                # Fallback: assume q.shape[1] is single frame (shouldn't happen in causal mode)
-                frame_seqlen = q.shape[1]
-                logger.warning(
-                    "grid_sizes not provided, using q.shape[1] as frame_seqlen"
-                )
-
-            current_end = current_start + roped_query.shape[1]
-            sink_tokens = self.sink_size * frame_seqlen
-
-            # Compute max_attention_size dynamically based on actual frame_seqlen
+            frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
             max_attention_size = (
                 15 * frame_seqlen
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
 
-            kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
-            global_end_index = (
-                int(kv_cache["global_end_index"].item())
-                if isinstance(kv_cache["global_end_index"], torch.Tensor)
-                else int(kv_cache["global_end_index"])
-            )
-            local_end_index_prev = (
-                int(kv_cache["local_end_index"].item())
-                if isinstance(kv_cache["local_end_index"], torch.Tensor)
-                else int(kv_cache["local_end_index"])
-            )
+            # Update cache with new roped keys and raw values
+            kv_cache = kv_cache.update(roped_key, v)
 
-            if (current_end > global_end_index) and (
-                num_new_tokens + local_end_index_prev > kv_cache_size
-            ):
-                num_evicted_tokens = (
-                    num_new_tokens + local_end_index_prev - kv_cache_size
-                )
-                num_rolled_tokens = (
-                    local_end_index_prev - num_evicted_tokens - sink_tokens
-                )
-                kv_cache["k"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["k"][
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                kv_cache["v"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["v"][
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                local_end_index = (
-                    local_end_index_prev
-                    + current_end - global_end_index - num_evicted_tokens
-                )
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-            else:
-                local_end_index = (
-                    local_end_index_prev + current_end - global_end_index
-                )
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-
-            kv_start = max(0, local_end_index - max_attention_size)
-            k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
-            v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+            # Retrieve windowed K/V for attention
+            k_for_attn, v_for_attn = kv_cache.get_attended_kv(
+                max_attn_size=max_attention_size
+            )
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
                 k_for_attn.transpose(1, 2),
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
-
-            if isinstance(kv_cache["global_end_index"], torch.Tensor):
-                kv_cache["global_end_index"].fill_(current_end)
-            else:
-                kv_cache["global_end_index"] = current_end
-            if isinstance(kv_cache["local_end_index"], torch.Tensor):
-                kv_cache["local_end_index"].fill_(local_end_index)
-            else:
-                kv_cache["local_end_index"] = local_end_index
 
         return x
 
@@ -475,9 +405,9 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         block_mask_keyboard: BlockMask | None = None,
         num_frame_per_block: int = 1,
         use_rope_keyboard: bool = True,
-        kv_cache: dict | None = None,
-        kv_cache_mouse: dict | None = None,
-        kv_cache_keyboard: dict | None = None,
+        kv_cache: KVCache | None = None,
+        kv_cache_mouse: KVCache | None = None,
+        kv_cache_keyboard: KVCache | None = None,
         crossattn_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
@@ -882,10 +812,10 @@ class CausalMatrixGameWanModel(BaseDiT):
         | None = None,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
-        kv_cache: dict = None,
-        kv_cache_mouse: dict = None,
-        kv_cache_keyboard: dict = None,
-        crossattn_cache: dict = None,
+        kv_cache: list[KVCache] | None = None,
+        kv_cache_mouse: list[KVCache] | None = None,
+        kv_cache_keyboard: list[KVCache] | None = None,
+        crossattn_cache: list[dict] | None = None,
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
