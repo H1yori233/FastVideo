@@ -14,8 +14,8 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_diffusion_forcing import (
-    DiffusionForcingScheduler,
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
+    SelfForcingFlowMatchScheduler,
 )
 from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
     MatrixGameCausalDMDPipeline,
@@ -35,13 +35,13 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = DiffusionForcingScheduler(
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
         )
         self.modules["scheduler"].set_timesteps(
-            num_inference_steps=1000, training=True
+            num_inference_steps=1000, training=False
         )
 
     def set_schemas(self):
@@ -93,12 +93,6 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             training_args
         )
         self.timestep_shift = training_args.pipeline_config.flow_shift
-        self.ar_noise_scheduler = DiffusionForcingScheduler(
-            shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True
-        )
-        self.ar_noise_scheduler.set_timesteps(
-            num_inference_steps=1000, training=True
-        )
 
         logger.info(
             "MatrixGame AR diffusion pipeline initialized with "
@@ -112,7 +106,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
 
-        validation_scheduler = DiffusionForcingScheduler(
+        validation_scheduler = SelfForcingFlowMatchScheduler(
             shift=args_copy.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True,
@@ -197,6 +191,29 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         )
         return timestep
 
+    def _add_diffusion_forcing_noise(
+        self,
+        original_samples: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+        sigma = timestep.to(dtype=torch.float32, device=noise.device)
+        sigma = sigma / float(1000)
+        sigma = sigma.clamp_(0.0, 1.0).reshape(-1, 1, 1, 1)
+        sample = (1 - sigma) * original_samples + sigma * noise
+        return sample.type_as(noise)
+
+    def _diffusion_forcing_training_target(
+        self,
+        sample: torch.Tensor,
+        noise: torch.Tensor,
+        timestep: torch.Tensor,
+    ) -> torch.Tensor:
+        del timestep
+        return noise - sample
+
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
         if batch is None:
@@ -278,7 +295,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
 
         timesteps = self._get_timestep(
             min_timestep=0,
-            max_timestep=self.ar_noise_scheduler.num_train_timesteps,
+            max_timestep=1000,
             batch_size=batch_size,
             num_frame=num_latent_t,
             num_frame_per_block=self.num_frame_per_block,
@@ -293,7 +310,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             dtype=latents_btchw.dtype,
         )
 
-        noisy_latents = self.ar_noise_scheduler.add_noise(
+        noisy_latents = self._add_diffusion_forcing_noise(
             latents_btchw.flatten(0, 1),
             noise.flatten(0, 1),
             timesteps.flatten(0, 1),
@@ -339,7 +356,7 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             [noisy_model_input, mask_lat_size, image_latents], dim=1
         )
 
-        training_target = self.ar_noise_scheduler.training_target(
+        training_target = self._diffusion_forcing_training_target(
             latents_btchw.flatten(0, 1),
             noise.flatten(0, 1),
             timesteps.flatten(0, 1),
