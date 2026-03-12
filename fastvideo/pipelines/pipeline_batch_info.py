@@ -296,8 +296,6 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
-    denoised_timestep_from: int | None = None
-    denoised_timestep_to: int | None = None
 
 
 @dataclass

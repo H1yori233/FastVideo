@@ -300,54 +300,13 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 f"{name} must be constant within each chunk for chunkwise rollout"
             )
 
-    def _get_self_forcing_timestep_bounds(
-        self, exit_flag: int
-    ) -> tuple[int | None, int | None]:
-        scheduler_timesteps = self.noise_scheduler.timesteps.to(self.device)
-        denoising_timestep = torch.as_tensor(
-            self.denoising_step_list[exit_flag],
-            device=self.device,
-            dtype=scheduler_timesteps.dtype,
-        )
-        denoised_timestep_from = self.num_train_timestep - torch.argmin(
-            (scheduler_timesteps - denoising_timestep).abs(), dim=0
-        ).item()
-        if exit_flag == len(self.denoising_step_list) - 1:
-            return denoised_timestep_from, 0
-
-        next_denoising_timestep = torch.as_tensor(
-            self.denoising_step_list[exit_flag + 1],
-            device=self.device,
-            dtype=scheduler_timesteps.dtype,
-        )
-        denoised_timestep_to = self.num_train_timestep - torch.argmin(
-            (scheduler_timesteps - next_denoising_timestep).abs(), dim=0
-        ).item()
-        return denoised_timestep_from, denoised_timestep_to
-
-    def _sample_restricted_batch_timesteps(
+    def _sample_batch_timesteps(
         self,
         batch_size: int,
-        *,
-        denoised_timestep_from: int | None,
-        denoised_timestep_to: int | None,
     ) -> torch.Tensor:
-        min_timestep = (
-            denoised_timestep_to
-            if denoised_timestep_to is not None
-            else 0
-        )
-        max_timestep = (
-            denoised_timestep_from
-            if denoised_timestep_from is not None
-            else self.num_train_timestep
-        )
-        if max_timestep <= min_timestep:
-            max_timestep = min_timestep + 1
-
         timestep = torch.randint(
-            min_timestep,
-            max_timestep,
+            0,
+            self.num_train_timestep,
             [batch_size],
             device=self.device,
             dtype=torch.long,
@@ -907,12 +866,6 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             # Step 2.4: update the start and end frame indices
             current_start_frame += current_num_frames
 
-        denoised_timestep_from, denoised_timestep_to = (
-            self._get_self_forcing_timestep_bounds(exit_flags[0])
-        )
-        training_batch.denoised_timestep_from = denoised_timestep_from
-        training_batch.denoised_timestep_to = denoised_timestep_to
-
         final_output = output.to(dtype)
 
         # Store visualization data
@@ -1102,14 +1055,8 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         """Compute DMD (Diffusion Model Distillation) loss for MatrixGame."""
         original_latent = generator_pred_video
         batch_size, num_frames = generator_pred_video.shape[:2]
-        denoised_timestep_from = training_batch.denoised_timestep_from
-        denoised_timestep_to = training_batch.denoised_timestep_to
         with torch.no_grad():
-            critic_timestep = self._sample_restricted_batch_timesteps(
-                batch_size,
-                denoised_timestep_from=denoised_timestep_from,
-                denoised_timestep_to=denoised_timestep_to,
-            )
+            critic_timestep = self._sample_batch_timesteps(batch_size)
             scheduler_timestep = critic_timestep.repeat_interleave(num_frames)
             noise = torch.randn_like(generator_pred_video)
 
@@ -1188,11 +1135,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                 training_batch)
 
         batch_size, num_frames = generator_pred_video.shape[:2]
-        fake_score_timestep = self._sample_restricted_batch_timesteps(
-            batch_size,
-            denoised_timestep_from=training_batch.denoised_timestep_from,
-            denoised_timestep_to=training_batch.denoised_timestep_to,
-        )
+        fake_score_timestep = self._sample_batch_timesteps(batch_size)
         scheduler_timestep = fake_score_timestep.repeat_interleave(num_frames)
         fake_score_noise = torch.randn_like(generator_pred_video)
 
