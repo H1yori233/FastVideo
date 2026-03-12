@@ -9,7 +9,6 @@ from typing import Any, Literal
 import torch
 
 from fastvideo.forward_context import set_forward_context
-from fastvideo.models.dits.matrixgame.kv_cache import KVCache
 
 from fastvideo.train.models.matrixgame.matrixgame import MatrixGameModel
 from fastvideo.train.models.wan.wan_causal import WanCausalModel
@@ -18,8 +17,8 @@ from fastvideo.train.models.wan.wan_causal import WanCausalModel
 @dataclass(slots=True)
 class _MatrixGameStreamingCaches:
     kv_cache: list[dict[str, Any]]
-    kv_cache_mouse: list[KVCache | None]
-    kv_cache_keyboard: list[KVCache | None]
+    kv_cache_mouse: list[dict[str, Any] | None]
+    kv_cache_keyboard: list[dict[str, Any] | None]
     crossattn_cache: list[dict[str, Any]] | None
     frame_seq_length: int
     local_attn_size: int
@@ -101,7 +100,6 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             crossattn_cache=crossattn_cache,
             cur_start_frame=cur_start_frame,
             frame_seq_length=int(caches.frame_seq_length),
-            store_kv=store_kv,
             num_frames=num_frames,
         )
         cond_dict = self._get_streaming_conditioning(
@@ -155,13 +153,17 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
         self,
         *,
         kv_cache: list[dict[str, Any]],
-        kv_cache_mouse: list[KVCache | None],
-        kv_cache_keyboard: list[KVCache | None],
-    ) -> tuple[list[dict[str, Any]], list[KVCache | None], list[KVCache | None]]:
+        kv_cache_mouse: list[dict[str, Any] | None],
+        kv_cache_keyboard: list[dict[str, Any] | None],
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any] | None],
+        list[dict[str, Any] | None],
+    ]:
         if self._should_snapshot_streaming_cache() and torch.is_grad_enabled():
             kv_cache = self._snapshot_kv_cache_indices(kv_cache)
-            kv_cache_mouse = self._snapshot_action_kv_cache_lengths(kv_cache_mouse)
-            kv_cache_keyboard = self._snapshot_action_kv_cache_lengths(
+            kv_cache_mouse = self._snapshot_action_kv_cache_indices(kv_cache_mouse)
+            kv_cache_keyboard = self._snapshot_action_kv_cache_indices(
                 kv_cache_keyboard
             )
         return kv_cache, kv_cache_mouse, kv_cache_keyboard
@@ -170,12 +172,11 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
         self,
         *,
         kv_cache: list[dict[str, Any]],
-        kv_cache_mouse: list[KVCache | None],
-        kv_cache_keyboard: list[KVCache | None],
+        kv_cache_mouse: list[dict[str, Any] | None],
+        kv_cache_keyboard: list[dict[str, Any] | None],
         crossattn_cache: list[dict[str, Any]] | None,
         cur_start_frame: int,
         frame_seq_length: int,
-        store_kv: bool,
         num_frames: int,
     ) -> dict[str, Any]:
         return {
@@ -185,7 +186,6 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             "crossattn_cache": crossattn_cache,
             "current_start": cur_start_frame * frame_seq_length,
             "start_frame": cur_start_frame,
-            "update_kv_cache": bool(store_kv),
             "num_frame_per_block": num_frames,
         }
 
@@ -258,6 +258,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             device=device,
             local_attn_size=local_attn_size,
             sliding_window_num_frames=sliding_window_num_frames,
+            frame_seq_length=frame_seq_length,
             channel="mouse",
         )
         kv_cache_keyboard = self._initialize_action_kv_cache(
@@ -267,6 +268,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
             device=device,
             local_attn_size=local_attn_size,
             sliding_window_num_frames=sliding_window_num_frames,
+            frame_seq_length=frame_seq_length,
             channel="keyboard",
         )
         crossattn_cache = self._initialize_crossattn_cache(
@@ -396,8 +398,9 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
         device: torch.device,
         local_attn_size: int,
         sliding_window_num_frames: int,
+        frame_seq_length: int,
         channel: Literal["mouse", "keyboard"],
-    ) -> list[KVCache | None]:
+    ) -> list[dict[str, Any] | None]:
         blocks = list(getattr(transformer, "blocks", []))
         if not blocks:
             return []
@@ -412,7 +415,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
                 f"Invalid action cache size for channel {channel!r}: {cache_size}"
             )
 
-        caches: list[KVCache | None] = []
+        caches: list[dict[str, Any] | None] = []
         for block in blocks:
             action_model = getattr(block, "action_model", None)
             if action_model is None:
@@ -445,32 +448,53 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
 
             num_heads = int(getattr(action_model, "heads_num"))
             head_dim = int(hidden_dim) // max(1, num_heads)
+            cache_batch_size = (
+                batch_size * frame_seq_length if channel == "mouse" else batch_size
+            )
             caches.append(
-                KVCache.zeros(
-                    batch_size=batch_size,
-                    cache_size=cache_size,
-                    num_heads=num_heads,
-                    head_dim=head_dim,
-                    dtype=dtype,
-                    device=device,
-                )
+                {
+                    "k": torch.zeros(
+                        [cache_batch_size, cache_size, num_heads, head_dim],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "v": torch.zeros(
+                        [cache_batch_size, cache_size, num_heads, head_dim],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "global_end_index": torch.zeros(
+                        (), dtype=torch.long, device=device
+                    ),
+                    "local_end_index": torch.zeros(
+                        (), dtype=torch.long, device=device
+                    ),
+                }
             )
         return caches
 
-    def _snapshot_action_kv_cache_lengths(
+    def _snapshot_action_kv_cache_indices(
         self,
-        caches: list[KVCache | None],
-    ) -> list[KVCache | None]:
-        snapshot: list[KVCache | None] = []
+        caches: list[dict[str, Any] | None],
+    ) -> list[dict[str, Any] | None]:
+        snapshot: list[dict[str, Any] | None] = []
         for cache in caches:
             if cache is None:
                 snapshot.append(None)
                 continue
-            snapshot.append(
-                KVCache(
-                    k=cache.k,
-                    v=cache.v,
-                    length=cache.length.detach().clone(),
+            global_end_index = cache.get("global_end_index")
+            local_end_index = cache.get("local_end_index")
+            if (
+                not isinstance(global_end_index, torch.Tensor)
+                or not isinstance(local_end_index, torch.Tensor)
+            ):
+                raise ValueError(
+                    "Unexpected action kv_cache index tensors; expected tensors at "
+                    "kv_cache[*].{global_end_index, local_end_index}"
                 )
-            )
+
+            copied = dict(cache)
+            copied["global_end_index"] = global_end_index.detach().clone()
+            copied["local_end_index"] = local_end_index.detach().clone()
+            snapshot.append(copied)
         return snapshot

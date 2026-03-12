@@ -17,7 +17,6 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.matrixgame.kv_cache import KVCache
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
@@ -494,10 +493,10 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         *,
         max_num_frames: int | None = None,
     ) -> tuple[
-        list[KVCache],
         list[dict[str, Any]],
-        list[KVCache | None],
-        list[KVCache | None],
+        list[dict[str, Any]],
+        list[dict[str, Any] | None],
+        list[dict[str, Any] | None],
     ]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
         num_transformer_blocks = len(self.transformer.blocks)
@@ -522,20 +521,40 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         if max_num_frames is None:
             max_num_frames = num_frames
-        num_max_frames = max(max_num_frames, num_frames)
         kv_cache_size = self.local_attn_size * frame_seq_length
 
-        kv_cache = []
+        kv_cache: list[dict[str, Any]] = []
         for _ in range(num_transformer_blocks):
             kv_cache.append(
-                KVCache.zeros(
-                    batch_size=batch_size,
-                    cache_size=kv_cache_size,
-                    num_heads=num_attention_heads,
-                    head_dim=attention_head_dim,
-                    dtype=dtype,
-                    device=device,
-                ))
+                {
+                    "k": torch.zeros(
+                        [
+                            batch_size,
+                            kv_cache_size,
+                            num_attention_heads,
+                            attention_head_dim,
+                        ],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "v": torch.zeros(
+                        [
+                            batch_size,
+                            kv_cache_size,
+                            num_attention_heads,
+                            attention_head_dim,
+                        ],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "global_end_index": torch.zeros(
+                        (), dtype=torch.long, device=device
+                    ),
+                    "local_end_index": torch.zeros(
+                        (), dtype=torch.long, device=device
+                    ),
+                }
+            )
 
         # Initialize cross-attention cache
         crossattn_cache = []
@@ -569,36 +588,71 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                              1024) if action_config else 1024
         keyboard_hidden_dim = action_config.get('keyboard_hidden_dim',
                                                 1024) if action_config else 1024
-        local_attn_size = getattr(
-            self.transformer, "local_attn_size",
-            action_config.get('local_attn_size', 6) if action_config else 6)
 
         mouse_head_dim = mouse_hidden_dim // action_heads_num
         keyboard_head_dim = keyboard_hidden_dim // action_heads_num
 
         action_cache_size = self.local_attn_size
-        kv_cache_mouse = []
-        kv_cache_keyboard = []
+        kv_cache_mouse: list[dict[str, Any] | None] = []
+        kv_cache_keyboard: list[dict[str, Any] | None] = []
         for block_idx in range(num_transformer_blocks):
             if block_idx in action_blocks:
-                kv_cache_mouse.append(
-                    KVCache.zeros(
-                        batch_size=batch_size * frame_seq_length,
-                        cache_size=action_cache_size,
-                        num_heads=action_heads_num,
-                        head_dim=mouse_head_dim,
+                kv_cache_mouse.append({
+                    "k":
+                    torch.zeros(
+                        [
+                            batch_size * frame_seq_length,
+                            action_cache_size,
+                            action_heads_num,
+                            mouse_head_dim,
+                        ],
                         dtype=dtype,
                         device=device,
-                    ))
-                kv_cache_keyboard.append(
-                    KVCache.zeros(
-                        batch_size=batch_size,
-                        cache_size=action_cache_size,
-                        num_heads=action_heads_num,
-                        head_dim=keyboard_head_dim,
+                    ),
+                    "v":
+                    torch.zeros(
+                        [
+                            batch_size * frame_seq_length,
+                            action_cache_size,
+                            action_heads_num,
+                            mouse_head_dim,
+                        ],
                         dtype=dtype,
                         device=device,
-                    ))
+                    ),
+                    "global_end_index":
+                    torch.zeros((), dtype=torch.long, device=device),
+                    "local_end_index":
+                    torch.zeros((), dtype=torch.long, device=device),
+                })
+                kv_cache_keyboard.append({
+                    "k":
+                    torch.zeros(
+                        [
+                            batch_size,
+                            action_cache_size,
+                            action_heads_num,
+                            keyboard_head_dim,
+                        ],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "v":
+                    torch.zeros(
+                        [
+                            batch_size,
+                            action_cache_size,
+                            action_heads_num,
+                            keyboard_head_dim,
+                        ],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    "global_end_index":
+                    torch.zeros((), dtype=torch.long, device=device),
+                    "local_end_index":
+                    torch.zeros((), dtype=torch.long, device=device),
+                })
             else:
                 kv_cache_mouse.append(None)
                 kv_cache_keyboard.append(None)
@@ -607,16 +661,17 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
     def _reset_simulation_caches(
             self,
-            kv_cache: list[KVCache],
+            kv_cache: list[dict[str, Any]],
             crossattn_cache: list[dict[str, Any]],
-            kv_cache_mouse: list[KVCache | None] | None,
-            kv_cache_keyboard: list[KVCache | None] | None) -> None:
+            kv_cache_mouse: list[dict[str, Any] | None] | None,
+            kv_cache_keyboard: list[dict[str, Any] | None] | None) -> None:
         """Reset KV cache, cross-attention cache, and action caches to clean state."""
         if kv_cache is not None:
             for cache in kv_cache:
-                cache.length.fill_(0)
-                cache.k.zero_()
-                cache.v.zero_()
+                cache["k"].zero_()
+                cache["v"].zero_()
+                cache["global_end_index"].zero_()
+                cache["local_end_index"].zero_()
 
         if crossattn_cache is not None:
             for cache_dict in crossattn_cache:
@@ -627,16 +682,18 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         if kv_cache_mouse is not None:
             for cache in kv_cache_mouse:
                 if cache is not None:
-                    cache.length.fill_(0)
-                    cache.k.zero_()
-                    cache.v.zero_()
+                    cache["k"].zero_()
+                    cache["v"].zero_()
+                    cache["global_end_index"].zero_()
+                    cache["local_end_index"].zero_()
 
         if kv_cache_keyboard is not None:
             for cache in kv_cache_keyboard:
                 if cache is not None:
-                    cache.length.fill_(0)
-                    cache.k.zero_()
-                    cache.v.zero_()
+                    cache["k"].zero_()
+                    cache["v"].zero_()
+                    cache["global_end_index"].zero_()
+                    cache["local_end_index"].zero_()
 
     def _generator_multi_step_simulation_forward(
             self,
@@ -747,8 +804,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             start_frame=current_start_frame,
-                            update_kv_cache=False).permute(
-                                0, 2, 1, 3, 4)
+                        ).permute(0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
@@ -792,8 +848,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
                                 start_frame=current_start_frame,
-                                update_kv_cache=False).permute(
-                                    0, 2, 1, 3, 4)
+                            ).permute(0, 2, 1, 3, 4)
                     else:
                         input_kwargs = self._build_generator_input_kwargs(
                             noisy_input,
@@ -814,8 +869,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             start_frame=current_start_frame,
-                            update_kv_cache=False).permute(
-                                0, 2, 1, 3, 4)
+                        ).permute(0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
@@ -860,8 +914,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     kv_cache_keyboard=self.kv_cache_keyboard,
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
-                    start_frame=current_start_frame,
-                    update_kv_cache=True)
+                    start_frame=current_start_frame)
 
             # Step 2.4: update the start and end frame indices
             current_start_frame += current_num_frames
