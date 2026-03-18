@@ -115,7 +115,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self,
         fastvideo_args: FastVideoArgs,
     ) -> StableWorldRuntimeState | None:
-        logger.info_once(
+        logger.info(
             "StableWorld config: "
             f"enabled={fastvideo_args.stableworld_enabled}, "
             f"threshold={fastvideo_args.stableworld_threshold}, "
