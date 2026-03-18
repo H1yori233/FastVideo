@@ -185,6 +185,10 @@ class FastVideoArgs:
     # MoE parameters used by Wan2.2
     boundary_ratio: float | None = 0.875
 
+    # stableWorld
+    stableworld_enabled: bool = False
+    stableworld_threshold: float = 0.78
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -514,6 +518,18 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
+        )
+        parser.add_argument(
+            "--stableworld-enabled",
+            action=StoreBoolean,
+            default=FastVideoArgs.stableworld_enabled,
+            help="Enable StableWorld KV-cache eviction for MatrixGame inference.",
+        )
+        parser.add_argument(
+            "--stableworld-threshold",
+            type=float,
+            default=FastVideoArgs.stableworld_threshold,
+            help="Similarity threshold used by StableWorld.",
         )
         parser.add_argument(
             "--override-text-encoder-safetensors",

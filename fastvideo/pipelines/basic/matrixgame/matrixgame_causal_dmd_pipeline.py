@@ -87,14 +87,15 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
         # Decode only the new generated block
         if end_idx > start_idx:
-            current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
-            args = ctx.fastvideo_args
-            decoder = self._stage_name_mapping["decoding_stage"]
-            decoded_frames, self._vae_cache = decoder.streaming_decode(current_latents,
-                                                                       args,
-                                                                       cache=self._vae_cache,
-                                                                       is_first_chunk=(start_idx == 0))
-            batch.output = decoded_frames
+            if batch.output is None:
+                current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
+                args = ctx.fastvideo_args
+                decoder = self._stage_name_mapping["decoding_stage"]
+                decoded_frames, self._vae_cache = decoder.streaming_decode(current_latents,
+                                                                           args,
+                                                                           cache=self._vae_cache,
+                                                                           is_first_chunk=(start_idx == 0))
+                batch.output = decoded_frames
         else:
             batch.output = None
 

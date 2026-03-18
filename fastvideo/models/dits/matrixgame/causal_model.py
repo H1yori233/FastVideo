@@ -45,6 +45,7 @@ from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
 from .model import MatrixGameCrossAttention
+from .stableworld import STABLEWORLD_EVICT_MIDDLE
 
 logger = init_logger(__name__)
 
@@ -171,6 +172,64 @@ class CausalMatrixGameSelfAttention(nn.Module):
             ),
         )
 
+    def _evict_middle_tokens(
+        self,
+        kv_cache: dict[str, torch.Tensor],
+        *,
+        sink_tokens: int,
+        frame_seqlen: int,
+        local_end_index_prev: int,
+    ) -> None:
+        frames_in_cache = max(
+            0,
+            (local_end_index_prev - sink_tokens) // frame_seqlen,
+        )
+        if frames_in_cache < 6:
+            self._evict_oldest_tokens(
+                kv_cache,
+                sink_tokens=sink_tokens,
+                num_evicted_tokens=3 * frame_seqlen,
+                local_end_index_prev=local_end_index_prev,
+            )
+            return
+
+        middle_start = sink_tokens + 3 * frame_seqlen
+        middle_end = middle_start + 3 * frame_seqlen
+        right_len = local_end_index_prev - middle_end
+        if right_len > 0:
+            kv_cache["k"][:, middle_start:middle_start + right_len] = (
+                kv_cache["k"][:, middle_end:middle_end + right_len].clone()
+            )
+            kv_cache["v"][:, middle_start:middle_start + right_len] = (
+                kv_cache["v"][:, middle_end:middle_end + right_len].clone()
+            )
+
+    def _evict_oldest_tokens(
+        self,
+        kv_cache: dict[str, torch.Tensor],
+        *,
+        sink_tokens: int,
+        num_evicted_tokens: int,
+        local_end_index_prev: int,
+    ) -> None:
+        num_rolled_tokens = (
+            local_end_index_prev - num_evicted_tokens - sink_tokens
+        )
+        kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = (
+            kv_cache["k"][
+                :,
+                sink_tokens + num_evicted_tokens:sink_tokens
+                + num_evicted_tokens
+                + num_rolled_tokens,
+            ].clone())
+        kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = (
+            kv_cache["v"][
+                :,
+                sink_tokens + num_evicted_tokens:sink_tokens
+                + num_evicted_tokens
+                + num_rolled_tokens,
+            ].clone())
+
     def forward(
         self,
         q: torch.Tensor,
@@ -182,6 +241,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         kv_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
+        stableworld_evict_policy: int = 0,
     ):
         if cache_start is None:
             cache_start = current_start
@@ -297,25 +357,23 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 num_evicted_tokens = (
                     num_new_tokens + local_end_index_prev - kv_cache_size
                 )
-                num_rolled_tokens = (
-                    local_end_index_prev - num_evicted_tokens - sink_tokens
-                )
-                kv_cache["k"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["k"][
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
-                kv_cache["v"][
-                    :, sink_tokens : sink_tokens + num_rolled_tokens
-                ] = kv_cache["v"][
-                    :,
-                    sink_tokens + num_evicted_tokens : sink_tokens
-                    + num_evicted_tokens
-                    + num_rolled_tokens,
-                ].clone()
+                if (
+                    stableworld_evict_policy == STABLEWORLD_EVICT_MIDDLE
+                    and num_evicted_tokens == 3 * frame_seqlen
+                ):
+                    self._evict_middle_tokens(
+                        kv_cache,
+                        sink_tokens=sink_tokens,
+                        frame_seqlen=frame_seqlen,
+                        local_end_index_prev=local_end_index_prev,
+                    )
+                else:
+                    self._evict_oldest_tokens(
+                        kv_cache,
+                        sink_tokens=sink_tokens,
+                        num_evicted_tokens=num_evicted_tokens,
+                        local_end_index_prev=local_end_index_prev,
+                    )
                 local_end_index = (
                     local_end_index_prev
                     + current_end - global_end_index - num_evicted_tokens
@@ -481,6 +539,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         crossattn_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
+        stableworld_evict_policy: int = 0,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -528,6 +587,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             kv_cache,
             current_start,
             cache_start,
+            stableworld_evict_policy,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -895,6 +955,9 @@ class CausalMatrixGameWanModel(BaseDiT):
         effective_num_frame_per_block = kwargs.pop(
             "num_frame_per_block", self.num_frame_per_block
         )
+        stableworld_evict_policy = kwargs.pop(
+            "stableworld_evict_policy", 0
+        )
 
         if mouse_cond is not None or keyboard_cond is not None:
             assert (
@@ -1089,6 +1152,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                         "current_start": current_start,
                         "cache_start": cache_start,
                         "num_frame_per_block": effective_num_frame_per_block,
+                        "stableworld_evict_policy": stableworld_evict_policy,
                     }
                 )
                 hidden_states = self._gradient_checkpointing_func(
@@ -1109,6 +1173,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                         else None,
                         "current_start": current_start,
                         "cache_start": cache_start,
+                        "stableworld_evict_policy": stableworld_evict_policy,
                     }
                 )
                 hidden_states = block(

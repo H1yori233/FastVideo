@@ -9,8 +9,17 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.matrixgame.stableworld import (
+    STABLEWORLD_EVICT_OLDEST,
+    STABLEWORLD_WINDOW_SIZE,
+    StableWorldDecodedChunk,
+    StableWorldRuntimeState,
+    decide_and_update_window_ids,
+    stableworld_is_available,
+)
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
@@ -53,6 +62,7 @@ class BlockProcessingContext:
 
     image_kwargs: dict[str, Any]
     pos_cond_kwargs: dict[str, Any]
+    stableworld: StableWorldRuntimeState | None
 
     def get_kv_cache(self, timestep_val: float) -> list[dict[Any, Any]]:
         if self.boundary_timestep is not None:
@@ -96,9 +106,87 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         self.action_config = getattr(self.transformer, 'action_config', {})
         self.use_action_module = len(self.action_config) > 0
+        self._preview_decoder = DecodingStage(vae=self.vae)
 
         self._streaming_initialized: bool = False
         self._streaming_ctx: BlockProcessingContext | None = None
+
+    def _build_stableworld_runtime(
+        self,
+        fastvideo_args: FastVideoArgs,
+    ) -> StableWorldRuntimeState | None:
+        if not fastvideo_args.stableworld_enabled:
+            return None
+
+        if self.num_frame_per_block != 3:
+            logger.warning_once(
+                "StableWorld eviction only supports num_frame_per_block=3; "
+                f"falling back to FIFO for num_frame_per_block={self.num_frame_per_block}"
+            )
+            return None
+
+        if self.vae is None:
+            logger.warning_once(
+                "StableWorld eviction requires a VAE for preview decoding; "
+                "falling back to FIFO"
+            )
+            return None
+
+        if not stableworld_is_available():
+            logger.warning_once(
+                "StableWorld eviction requires OpenCV; falling back to FIFO"
+            )
+            return None
+
+        return StableWorldRuntimeState(
+            threshold=fastvideo_args.stableworld_threshold,
+            window_ids=list(range(STABLEWORLD_WINDOW_SIZE)),
+            decoded_chunks=[],
+            preview_cache=self.vae.get_streaming_cache(),
+        )
+
+    def _maybe_update_stableworld_policy(self, ctx: BlockProcessingContext) -> None:
+        if ctx.stableworld is None:
+            return
+        ctx.stableworld.evict_policy = STABLEWORLD_EVICT_OLDEST
+
+        if ctx.start_index < len(ctx.stableworld.window_ids):
+            return
+
+        evict_policy, window_ids, _ = decide_and_update_window_ids(
+            window_ids=ctx.stableworld.window_ids,
+            decoded_chunks=ctx.stableworld.decoded_chunks,
+            sim_threshold=ctx.stableworld.threshold,
+        )
+        ctx.stableworld.window_ids = window_ids
+        ctx.stableworld.evict_policy = evict_policy
+
+    def _preview_decode_block(
+        self,
+        current_latents: torch.Tensor,
+        ctx: BlockProcessingContext,
+        start_index: int,
+    ) -> None:
+        if ctx.stableworld is None:
+            return
+        ctx.stableworld.last_decoded_chunk = None
+
+        decoded_frames, preview_cache = self._preview_decoder.streaming_decode(
+            current_latents,
+            ctx.fastvideo_args,
+            cache=ctx.stableworld.preview_cache,
+            is_first_chunk=(start_index == 0),
+        )
+        ctx.stableworld.preview_cache = preview_cache
+        decoded_frames = decoded_frames.to(torch.float32)
+        ctx.stableworld.last_decoded_chunk = decoded_frames
+        ctx.stableworld.decoded_chunks.append(
+            StableWorldDecodedChunk(
+                latent_start=start_index,
+                num_latent_frames=current_latents.shape[2],
+                frames=decoded_frames.detach().cpu(),
+                is_first_chunk=(start_index == 0),
+            ))
 
     def forward(
         self,
@@ -174,6 +262,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         # NOTE: MatrixGame does NOT process the first frame separately.
         # The first frame information is already encoded in batch.image_latent (cond_concat)
         # and will be used by the model via channel concatenation: torch.cat([x, cond_concat], dim=1)
+        stableworld = self._build_stableworld_runtime(fastvideo_args)
 
         ctx = BlockProcessingContext(
             batch=batch,
@@ -195,6 +284,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             context_noise=getattr(fastvideo_args.pipeline_config, "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
+            stableworld=stableworld,
         )
 
         context_noise = getattr(fastvideo_args.pipeline_config, "context_noise", 0)
@@ -203,6 +293,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             for block_idx, current_num_frames in enumerate(block_sizes):
                 ctx.block_idx = block_idx
                 ctx.start_index = start_index
+                self._maybe_update_stableworld_policy(ctx)
                 current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
 
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
@@ -230,6 +321,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     action_kwargs=action_kwargs,
                     context_noise=context_noise,
                 )
+                self._preview_decode_block(current_latents, ctx, start_index)
 
                 start_index += current_num_frames
 
@@ -411,6 +503,11 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     "crossattn_cache": ctx.crossattn_cache,
                     "current_start": start_index * self.frame_seq_length,
                     "start_frame": start_index,
+                    "stableworld_evict_policy": (
+                        ctx.stableworld.evict_policy
+                        if ctx.stableworld is not None
+                        else STABLEWORLD_EVICT_OLDEST
+                    ),
                 }
 
                 if self.use_action_module and current_model == self.transformer:
@@ -509,6 +606,11 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 "crossattn_cache": ctx.crossattn_cache,
                 "current_start": start_index * self.frame_seq_length,
                 "start_frame": start_index,
+                "stableworld_evict_policy": (
+                    ctx.stableworld.evict_policy
+                    if ctx.stableworld is not None
+                    else STABLEWORLD_EVICT_OLDEST
+                ),
             }
 
             if self.use_action_module:
@@ -527,6 +629,11 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     crossattn_cache=ctx.crossattn_cache,
                     current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
+                    stableworld_evict_policy=(
+                        ctx.stableworld.evict_policy
+                        if ctx.stableworld is not None
+                        else STABLEWORLD_EVICT_OLDEST
+                    ),
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )
@@ -617,6 +724,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 device=latents.device,
             ) for _ in range(num_denoising_steps - 1)
         ]
+        stableworld = self._build_stableworld_runtime(fastvideo_args)
 
         # Create and store context
         self._streaming_ctx = BlockProcessingContext(
@@ -639,6 +747,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             context_noise=getattr(fastvideo_args.pipeline_config, "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
+            stableworld=stableworld,
         )
 
         self._streaming_initialized = True
@@ -655,11 +764,15 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             return ctx.batch
 
         batch = ctx.batch
+        batch.output = None
         latents = batch.latents
         assert latents is not None, "latents must be set in batch"
 
         current_num_frames = ctx.block_sizes[ctx.block_idx]
         start_index = ctx.start_index
+        if ctx.stableworld is not None:
+            ctx.stableworld.last_decoded_chunk = None
+        self._maybe_update_stableworld_policy(ctx)
 
         current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
 
@@ -712,6 +825,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             action_kwargs=action_kwargs,
             context_noise=ctx.context_noise,
         )
+        self._preview_decode_block(current_latents, ctx, start_index)
+        if ctx.stableworld is not None and ctx.stableworld.last_decoded_chunk is not None:
+            batch.output = ctx.stableworld.last_decoded_chunk
 
         # Advance streaming state
         ctx.start_index += current_num_frames
