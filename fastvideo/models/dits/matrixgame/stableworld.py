@@ -16,7 +16,6 @@ except ImportError:  # pragma: no cover - exercised through fallback tests
 logger = init_logger(__name__)
 
 STABLEWORLD_SUBFRAME_INDEX = 2
-STABLEWORLD_WINDOW_SIZE = 9
 STABLEWORLD_EVICT_OLDEST = 0
 STABLEWORLD_EVICT_MIDDLE = 1
 _STABLEWORLD_DEFAULT_FRAMES_PER_LATENT = 4
@@ -168,26 +167,46 @@ def get_decoded_frame_by_latent(
     raise ValueError(f"StableWorld could not resolve latent_id={latent_id}")
 
 
-def _fallback_window(window_ids: list[int]) -> tuple[int, list[int], float]:
+def _fallback_window(
+    window_ids: list[int],
+    num_frame_per_block: int,
+) -> tuple[int, list[int], float]:
+    if len(window_ids) < num_frame_per_block:
+        raise ValueError(
+            "StableWorld window must contain at least num_frame_per_block latent ids"
+        )
     last_id = window_ids[-1]
-    next_ids = [last_id + 1, last_id + 2, last_id + 3]
-    return STABLEWORLD_EVICT_OLDEST, window_ids[3:] + next_ids, 0.0
+    next_ids = [
+        last_id + offset
+        for offset in range(1, num_frame_per_block + 1)
+    ]
+    return (
+        STABLEWORLD_EVICT_OLDEST,
+        window_ids[num_frame_per_block:] + next_ids,
+        0.0,
+    )
 
 
 def decide_and_update_window_ids(
     window_ids: list[int],
     decoded_chunks: list[StableWorldDecodedChunk],
     sim_threshold: float,
+    num_frame_per_block: int = 3,
     sub: int = STABLEWORLD_SUBFRAME_INDEX,
     batch_index: int = 0,
     similarity_fn: Callable[[torch.Tensor, torch.Tensor], float]
     | None = None,
 ) -> tuple[int, list[int], float]:
-    if len(window_ids) < 6:
-        raise ValueError("StableWorld window must contain at least 6 latent ids")
+    if len(window_ids) < num_frame_per_block:
+        raise ValueError(
+            "StableWorld window must contain at least num_frame_per_block latent ids"
+        )
 
-    if len(window_ids) < STABLEWORLD_WINDOW_SIZE or not decoded_chunks:
-        return _fallback_window(window_ids)
+    compare_index_1 = num_frame_per_block - 1
+    compare_index_2 = compare_index_1 + num_frame_per_block
+
+    if compare_index_2 >= len(window_ids) or not decoded_chunks:
+        return _fallback_window(window_ids, num_frame_per_block)
 
     if similarity_fn is None:
         if not stableworld_is_available():
@@ -195,37 +214,43 @@ def decide_and_update_window_ids(
                 "StableWorld requested but OpenCV is unavailable; "
                 "falling back to FIFO eviction"
             )
-            return _fallback_window(window_ids)
+            return _fallback_window(window_ids, num_frame_per_block)
         similarity_fn = orb_ransac_score_chw
 
-    latent_id_2 = window_ids[2]
-    latent_id_5 = window_ids[5]
+    latent_id_1 = window_ids[compare_index_1]
+    latent_id_2 = window_ids[compare_index_2]
 
     try:
+        frame_1 = get_decoded_frame_by_latent(
+            decoded_chunks,
+            latent_id_1,
+            sub=sub,
+            batch_index=batch_index,
+        )
         frame_2 = get_decoded_frame_by_latent(
             decoded_chunks,
             latent_id_2,
             sub=sub,
             batch_index=batch_index,
         )
-        frame_5 = get_decoded_frame_by_latent(
-            decoded_chunks,
-            latent_id_5,
-            sub=sub,
-            batch_index=batch_index,
-        )
     except ValueError:
-        return _fallback_window(window_ids)
+        return _fallback_window(window_ids, num_frame_per_block)
 
-    similarity = float(similarity_fn(frame_2, frame_5))
+    similarity = float(similarity_fn(frame_1, frame_2))
     last_id = window_ids[-1]
-    next_ids = [last_id + 1, last_id + 2, last_id + 3]
+    next_ids = [
+        last_id + offset
+        for offset in range(1, num_frame_per_block + 1)
+    ]
 
     if similarity >= sim_threshold:
-        kept = window_ids[:3] + window_ids[6:]
+        kept = (
+            window_ids[:num_frame_per_block]
+            + window_ids[2 * num_frame_per_block:]
+        )
         evict_policy = STABLEWORLD_EVICT_MIDDLE
     else:
-        kept = window_ids[3:]
+        kept = window_ids[num_frame_per_block:]
         evict_policy = STABLEWORLD_EVICT_OLDEST
 
     new_window_ids = kept + next_ids

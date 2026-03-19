@@ -11,7 +11,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.matrixgame.stableworld import (
     STABLEWORLD_EVICT_OLDEST,
-    STABLEWORLD_WINDOW_SIZE,
     StableWorldDecodedChunk,
     StableWorldRuntimeState,
     decide_and_update_window_ids,
@@ -115,39 +114,36 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self,
         fastvideo_args: FastVideoArgs,
     ) -> StableWorldRuntimeState | None:
-        logger.info(
-            "StableWorld config: "
-            f"enabled={fastvideo_args.stableworld_enabled}, "
-            f"threshold={fastvideo_args.stableworld_threshold}, "
-            f"num_frame_per_block={self.num_frame_per_block}."
-        )
+        logger.info("StableWorld config: "
+                    f"enabled={fastvideo_args.stableworld_enabled}, "
+                    f"threshold={fastvideo_args.stableworld_threshold}, "
+                    f"num_frame_per_block={self.num_frame_per_block}.")
 
         if not fastvideo_args.stableworld_enabled:
             return None
 
         if self.num_frame_per_block != 3:
-            logger.warning_once(
-                "StableWorld eviction only supports num_frame_per_block=3; "
-                f"falling back to FIFO for num_frame_per_block={self.num_frame_per_block}"
-            )
+            logger.warning_once("StableWorld eviction only supports num_frame_per_block=3; "
+                                f"falling back to FIFO for num_frame_per_block={self.num_frame_per_block}")
             return None
 
         if self.vae is None:
-            logger.warning_once(
-                "StableWorld eviction requires a VAE for preview decoding; "
-                "falling back to FIFO"
-            )
+            logger.warning_once("StableWorld eviction requires a VAE for preview decoding; "
+                                "falling back to FIFO")
             return None
 
         if not stableworld_is_available():
-            logger.warning_once(
-                "StableWorld eviction requires OpenCV; falling back to FIFO"
-            )
+            logger.warning_once("StableWorld eviction requires OpenCV; falling back to FIFO")
+            return None
+
+        if self.local_attn_size < self.num_frame_per_block:
+            logger.warning_once("StableWorld eviction requires local_attn_size >= num_frame_per_block; "
+                                f"falling back to FIFO for local_attn_size={self.local_attn_size}")
             return None
 
         return StableWorldRuntimeState(
             threshold=fastvideo_args.stableworld_threshold,
-            window_ids=list(range(STABLEWORLD_WINDOW_SIZE)),
+            window_ids=list(range(self.local_attn_size)),
             decoded_chunks=[],
             preview_cache=self.vae.get_streaming_cache(),
         )
@@ -164,6 +160,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             window_ids=ctx.stableworld.window_ids,
             decoded_chunks=ctx.stableworld.decoded_chunks,
             sim_threshold=ctx.stableworld.threshold,
+            num_frame_per_block=self.num_frame_per_block,
         )
         ctx.stableworld.window_ids = window_ids
         ctx.stableworld.evict_policy = evict_policy
@@ -506,15 +503,16 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                                       dtype=torch.long)
 
                 model_kwargs = {
-                    "kv_cache": ctx.get_kv_cache(t_cur),
-                    "crossattn_cache": ctx.crossattn_cache,
-                    "current_start": start_index * self.frame_seq_length,
-                    "start_frame": start_index,
-                    "stableworld_evict_policy": (
-                        ctx.stableworld.evict_policy
-                        if ctx.stableworld is not None
-                        else STABLEWORLD_EVICT_OLDEST
-                    ),
+                    "kv_cache":
+                    ctx.get_kv_cache(t_cur),
+                    "crossattn_cache":
+                    ctx.crossattn_cache,
+                    "current_start":
+                    start_index * self.frame_seq_length,
+                    "start_frame":
+                    start_index,
+                    "stableworld_evict_policy":
+                    (ctx.stableworld.evict_policy if ctx.stableworld is not None else STABLEWORLD_EVICT_OLDEST),
                 }
 
                 if self.use_action_module and current_model == self.transformer:
@@ -609,15 +607,16 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                 forward_batch=batch):
 
             context_model_kwargs = {
-                "kv_cache": ctx.kv_cache1,
-                "crossattn_cache": ctx.crossattn_cache,
-                "current_start": start_index * self.frame_seq_length,
-                "start_frame": start_index,
-                "stableworld_evict_policy": (
-                    ctx.stableworld.evict_policy
-                    if ctx.stableworld is not None
-                    else STABLEWORLD_EVICT_OLDEST
-                ),
+                "kv_cache":
+                ctx.kv_cache1,
+                "crossattn_cache":
+                ctx.crossattn_cache,
+                "current_start":
+                start_index * self.frame_seq_length,
+                "start_frame":
+                start_index,
+                "stableworld_evict_policy":
+                (ctx.stableworld.evict_policy if ctx.stableworld is not None else STABLEWORLD_EVICT_OLDEST),
             }
 
             if self.use_action_module:
@@ -636,11 +635,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     crossattn_cache=ctx.crossattn_cache,
                     current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
-                    stableworld_evict_policy=(
-                        ctx.stableworld.evict_policy
-                        if ctx.stableworld is not None
-                        else STABLEWORLD_EVICT_OLDEST
-                    ),
+                    stableworld_evict_policy=(ctx.stableworld.evict_policy
+                                              if ctx.stableworld is not None else STABLEWORLD_EVICT_OLDEST),
                     **ctx.image_kwargs,
                     **ctx.pos_cond_kwargs,
                 )

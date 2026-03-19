@@ -188,6 +188,7 @@ class FastVideoArgs:
     # stableWorld
     stableworld_enabled: bool = False
     stableworld_threshold: float = 0.78
+    local_attn_size_override: int | None = None
 
     @property
     def training_mode(self) -> bool:
@@ -530,6 +531,12 @@ class FastVideoArgs:
             type=float,
             default=FastVideoArgs.stableworld_threshold,
             help="Similarity threshold used by StableWorld.",
+        )
+        parser.add_argument(
+            "--local-attn-size-override",
+            type=int,
+            default=FastVideoArgs.local_attn_size_override,
+            help="Override local_attn_size.",
         )
         parser.add_argument(
             "--override-text-encoder-safetensors",

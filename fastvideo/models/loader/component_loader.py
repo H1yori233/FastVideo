@@ -785,6 +785,23 @@ class TransformerLoader(ComponentLoader):
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
+        local_attn_size_override = getattr(
+            fastvideo_args,
+            "local_attn_size_override",
+            None,
+        )
+        if local_attn_size_override is not None:
+            if hasattr(dit_config, "local_attn_size"):
+                dit_config.local_attn_size = local_attn_size_override
+            arch_config = getattr(dit_config, "arch_config", None)
+            if arch_config is not None and hasattr(
+                arch_config, "local_attn_size"
+            ):
+                arch_config.local_attn_size = local_attn_size_override
+            logger.info(
+                "Overriding transformer local_attn_size to %s before model init",
+                local_attn_size_override,
+            )
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 

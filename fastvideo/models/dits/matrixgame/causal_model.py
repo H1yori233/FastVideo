@@ -178,23 +178,36 @@ class CausalMatrixGameSelfAttention(nn.Module):
         *,
         sink_tokens: int,
         frame_seqlen: int,
+        num_evicted_tokens: int,
         local_end_index_prev: int,
     ) -> None:
-        frames_in_cache = max(
-            0,
-            (local_end_index_prev - sink_tokens) // frame_seqlen,
-        )
-        if frames_in_cache < 6:
+        if num_evicted_tokens <= 0:
+            return
+        if num_evicted_tokens % frame_seqlen != 0:
             self._evict_oldest_tokens(
                 kv_cache,
                 sink_tokens=sink_tokens,
-                num_evicted_tokens=3 * frame_seqlen,
+                num_evicted_tokens=num_evicted_tokens,
                 local_end_index_prev=local_end_index_prev,
             )
             return
 
-        middle_start = sink_tokens + 3 * frame_seqlen
-        middle_end = middle_start + 3 * frame_seqlen
+        evict_frames = num_evicted_tokens // frame_seqlen
+        frames_in_cache = max(
+            0,
+            (local_end_index_prev - sink_tokens) // frame_seqlen,
+        )
+        if frames_in_cache < 2 * evict_frames:
+            self._evict_oldest_tokens(
+                kv_cache,
+                sink_tokens=sink_tokens,
+                num_evicted_tokens=num_evicted_tokens,
+                local_end_index_prev=local_end_index_prev,
+            )
+            return
+
+        middle_start = sink_tokens + num_evicted_tokens
+        middle_end = middle_start + num_evicted_tokens
         right_len = local_end_index_prev - middle_end
         if right_len > 0:
             kv_cache["k"][:, middle_start:middle_start + right_len] = (
@@ -357,14 +370,12 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 num_evicted_tokens = (
                     num_new_tokens + local_end_index_prev - kv_cache_size
                 )
-                if (
-                    stableworld_evict_policy == STABLEWORLD_EVICT_MIDDLE
-                    and num_evicted_tokens == 3 * frame_seqlen
-                ):
+                if stableworld_evict_policy == STABLEWORLD_EVICT_MIDDLE:
                     self._evict_middle_tokens(
                         kv_cache,
                         sink_tokens=sink_tokens,
                         frame_seqlen=frame_seqlen,
+                        num_evicted_tokens=num_evicted_tokens,
                         local_end_index_prev=local_end_index_prev,
                     )
                 else:

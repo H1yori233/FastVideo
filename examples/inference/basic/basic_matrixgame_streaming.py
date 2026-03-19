@@ -12,6 +12,7 @@ import asyncio
 MODEL_VARIANT = "base_distilled_model"
 STABLEWORLD_ENABLED = False
 STABLEWORLD_THRESHOLD = 0.78
+LOCAL_ATTN_SIZE_OVERRIDE = 9
 
 # Variant-specific settings
 VARIANT_CONFIG = {
@@ -56,6 +57,7 @@ async def main():
         pin_cpu_memory=True,
         stableworld_enabled=STABLEWORLD_ENABLED,
         stableworld_threshold=STABLEWORLD_THRESHOLD,
+        local_attn_size_override=LOCAL_ATTN_SIZE_OVERRIDE,
         # image_encoder_cpu_offload=False,
     )
 
