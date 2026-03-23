@@ -268,7 +268,10 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     "grid_sizes not provided, using q.shape[1] as frame_seqlen"
                 )
 
-            current_end = current_start + roped_query.shape[1]
+            num_new_tokens = q.shape[1]
+            num_new_frames = num_new_tokens // frame_seqlen
+            current_end = current_start + num_new_tokens
+            current_start_frame = current_start // frame_seqlen
             sink_tokens = self.sink_size * frame_seqlen
 
             # Compute max_attention_size dynamically based on actual frame_seqlen
@@ -277,6 +280,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
+            max_attention_frames = max_attention_size // frame_seqlen
 
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
@@ -321,23 +325,45 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     + current_end - global_end_index - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["k"][:, local_start_index:local_end_index] = k
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 local_end_index = (
                     local_end_index_prev + current_end - global_end_index
                 )
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                kv_cache["k"][:, local_start_index:local_end_index] = k
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
             kv_start = max(0, local_end_index - max_attention_size)
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
             v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+            window_frames = k_for_attn.shape[1] // frame_seqlen
+            window_grid_sizes = (window_frames, grid_sizes[1], grid_sizes[2])
+
+            relative_start_frame = (
+                current_start_frame
+                if current_start_frame < max_attention_frames
+                else max(0, max_attention_frames - num_new_frames)
+            )
+            roped_query = causal_rope_apply(
+                q,
+                grid_sizes,
+                freqs,
+                start_frame=relative_start_frame,
+            ).type_as(v)
+            roped_key = causal_rope_apply(
+                k_for_attn,
+                window_grid_sizes,
+                freqs,
+                start_frame=0,
+            ).type_as(v)
+            if sink_tokens > 0:
+                roped_key[:, :sink_tokens] = k_for_attn[:, :sink_tokens]
 
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
-                k_for_attn.transpose(1, 2),
+                roped_key.transpose(1, 2),
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
 
