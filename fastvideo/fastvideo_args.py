@@ -827,6 +827,11 @@ class TrainingArgs(FastVideoArgs):
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
     log_validation: bool = False
+    evaluate_ptlflow: bool = False
+    ptlflow_dir: str = "/mnt/weka/home/hao.zhang/mhuo/FastVideo/benchmarks/ptlflow"
+    ptlflow_ckpt: str = ""
+    ptlflow_calibration_path: str = ""
+    ptlflow_use_depth: bool = True
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
     wandb_run_name: str = ""
