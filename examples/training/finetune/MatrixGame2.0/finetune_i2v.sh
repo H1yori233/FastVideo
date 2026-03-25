@@ -2,32 +2,42 @@
 
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
-# export WANDB_MODE=online
-export WANDB_MODE=offline
+export WANDB_MODE=online
+# export WANDB_MODE=offline
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
+# Configs
+# MODEL_PATH="../mg_models/Solaris-6K"
 MODEL_PATH="../mg_models/Solaris-30K"
-DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=1
-# export CUDA_VISIBLE_DEVICES=4,5
-# IP=[MASTER NODE IP]
+# MODEL_PATH="../mg_models/skyreel"
+# MODEL_PATH="../mg_models/Matrix-Game-2.0-Base-Diffusers"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+# DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
+# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed"
+# VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation_8_vpt_mix.json"
+# VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation.json"
+VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json"
+NUM_GPUS=4
 
 # Training arguments
 training_args=(
   --tracker_project_name "mg_finetune_solaris"
-  --wandb_run_name "reference_videos"
-  --output_dir "checkpoints/reference_test"
-  --max_train_steps 1500000
+  --output_dir "checkpoints/matrixgame_finetune_${RUN_NAME}"
+  # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
+  --wandb_run_name "${RUN_NAME}_test"
+  --override_transformer_cls_name "MatrixGameWanModel"
+  --max_train_steps 30000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 21
+  --gradient_accumulation_steps 2
+  --num_latent_t 20
   --num_height 352
   --num_width 640
   --num_frames 81
   # --enable_gradient_checkpointing_type "full"
+  # --reinit-action-module True
+  # --override-keyboard-dim 23
 )
 
 # Parallel arguments
@@ -36,7 +46,7 @@ parallel_args=(
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 1
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
@@ -53,20 +63,21 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  # --log_validation
+  --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  # --validation_steps 100
-  --validation_sampling_steps "40"
+  --validation_steps 500
+  --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-5
+  --learning_rate 1e-4
+  --betas "0.9,0.95"
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 100
-  --training_state_checkpointing_steps 100
-  --weight_decay 1e-4
+  --weight_only_checkpointing_steps 2000
+  --training_state_checkpointing_steps 2000
+  --weight_decay 0
   --max_grad_norm 1.0
 )
 

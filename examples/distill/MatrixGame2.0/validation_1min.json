@@ -1,0 +1,48 @@
+{
+    "data": [
+        {
+            "caption": "08",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000003/batch2_split_9_000041_Alpha_instance_000_clip000810.png",
+            "ref_video": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000003/batch2_split_9_000041_Alpha_instance_000_clip000810.mp4",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/distill/MatrixGame2.0/w_1677.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 1677
+        },
+        {
+            "caption": "09",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000002/batch2_split_4_000076_Bravo_instance_001_clip000000.png",
+            "ref_video": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000002/batch2_split_4_000076_Bravo_instance_001_clip000000.mp4",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/distill/MatrixGame2.0/s_1677.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 1677
+        },
+        {
+            "caption": "10",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000000/75_batch2_split_2_000041_Bravo_instance_003_clip002673.png",
+            "ref_video": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000000/75_batch2_split_2_000041_Bravo_instance_003_clip002673.mp4",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/distill/MatrixGame2.0/a_1677.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 1677
+        },
+        {
+            "caption": "11",
+            "image_path": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000002/batch2_split_5_000053_Alpha_instance_003_clip000243.png",
+            "ref_video": "/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f_test/000002/batch2_split_5_000053_Alpha_instance_003_clip000243.mp4",
+            "action_path": "/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/distill/MatrixGame2.0/d_1677.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 1677
+        }
+    ]
+}

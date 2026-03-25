@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mg-df
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -35,19 +35,19 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-MODEL_PATH="../mg_models/Solaris-20Ksteps-0301"
-DATA_DIR="../solaris/datasets/train/preprocessed_0228_81"
-VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_df.json"
+MODEL_PATH="../mg_models/Solaris-30K-8K"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
+VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation.json"
 
 # Training arguments
 training_args=(
   --tracker_project_name "mg_finetune_solaris_df"
   --output_dir "checkpoints/matrixgame_df_${RUN_NAME}"
   --wandb_run_name "${RUN_NAME}_df_test"
-  --max_train_steps 10000
+  --max_train_steps 20000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 2
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -59,11 +59,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 32
+  --num_gpus 16
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 32
+  --hsdp_shard_dim 16
 )
 
 # Model arguments
@@ -73,6 +73,7 @@ model_args=(
   --override-transformer-cls-name "CausalMatrixGameWanModel"
   --flow_shift 5
 )
+
 
 # Dataset arguments
 dataset_args=(

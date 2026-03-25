@@ -29,7 +29,8 @@ MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29501}"
 export TOKENIZERS_PARALLELISM=false
 # ── W&B ──────────────────────────────────────────────────────────
-export WANDB_API_KEY="${WANDB_API_KEY:-}"
+# export WANDB_API_KEY="${WANDB_API_KEY:-}"
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_MODE="${WANDB_MODE:-online}"
 
 # ── Log file ─────────────────────────────────────────────────────

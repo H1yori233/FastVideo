@@ -6,7 +6,7 @@
 models:
   student:
     _target_: fastvideo.train.models.matrixgame.matrixgame.MatrixGameModel
-    init_from: ../mg_models/Solaris-6K
+    init_from: ../mg_models/Solaris-30K-8K
     trainable: true
 
 method:

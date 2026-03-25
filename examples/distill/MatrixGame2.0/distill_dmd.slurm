@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=mg-test
+#SBATCH --job-name=mg-diag
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -35,7 +35,8 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="../mg_models/Solaris-Causal-30K-8K-18K"
+# GENERATOR_MODEL_PATH="../mg_models/Solaris-Causal-30K-8K-18K"
+GENERATOR_MODEL_PATH="../mg_models/Solaris-SF-30K-8K-18K"
 REAL_SCORE_MODEL_PATH="../mg_models/Solaris-30K-8K-18K"  # Teacher mode
 FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-30K-8K-18K"  # Critic model
 
@@ -51,10 +52,10 @@ training_args=(
   --tracker_project_name "matrixgame_sf"
   --output_dir "checkpoints/matrixgame_sf_${RUN_NAME}"
   --wandb_run_name "${RUN_NAME}_test"
-  --max_train_steps 1200
+  --max_train_steps 1000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 4
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -70,11 +71,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 32
+  --num_gpus 8
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 32
+  --hsdp_shard_dim 8
 )
 
 model_args=(

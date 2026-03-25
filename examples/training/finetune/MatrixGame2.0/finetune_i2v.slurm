@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mg-solaris
+#SBATCH --job-name=mg-finetune
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -36,18 +36,24 @@ echo "RUN_NAME: $RUN_NAME"
 
 # Configs
 # MODEL_PATH="../mg_models/Solaris-6K"
-MODEL_PATH="../mg_models/Solaris-30K"
-# DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
-DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
-VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation.json"
+# MODEL_PATH="../mg_models/Solaris-30K"
+MODEL_PATH="../mg_models/skyreel"
+# MODEL_PATH="../mg_models/Matrix-Game-2.0-Base-Diffusers"
+DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+# DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
+# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed"
+# VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation_8_vpt_mix.json"
+VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation.json"
+NUM_GPUS=4
 
 # Training arguments
 training_args=(
   --tracker_project_name "mg_finetune_solaris"
   --output_dir "checkpoints/matrixgame_finetune_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_bs64_continue"
-  # --override_transformer_cls_name "MatrixGameWanModel"
-  --max_train_steps 40000
+  # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
+  --wandb_run_name "${RUN_NAME}_skyreel_bs64"
+  --override_transformer_cls_name "MatrixGameWanModel"
+  --max_train_steps 30000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 2
@@ -56,8 +62,8 @@ training_args=(
   --num_width 640
   --num_frames 81
   # --enable_gradient_checkpointing_type "full"
-  # --reinit-action-module True
-  # --override-keyboard-dim 23
+  --reinit-action-module True
+  --override-keyboard-dim 23
 )
 
 # Parallel arguments
