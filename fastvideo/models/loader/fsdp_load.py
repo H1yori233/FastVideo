@@ -7,6 +7,7 @@
 from __future__ import annotations
 import os
 import contextlib
+from collections import defaultdict
 from collections.abc import Callable, Generator
 from itertools import chain
 from typing import Any
@@ -20,12 +21,119 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.logger import init_logger
-from fastvideo.models.loader.utils import (get_param_names_mapping,
-                                           hf_to_custom_state_dict)
+from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 
 logger = init_logger(__name__)
+
+
+def _should_skip_missing_text_embedder_param(
+    target_param_name: str,
+    meta_sd: dict[str, Any],
+) -> bool:
+    """Skip text embedder weights when the instantiated model has no text path."""
+    text_prefix = "condition_embedder.text_embedder."
+    if not target_param_name.startswith(text_prefix):
+        return False
+    return not any(name.startswith(text_prefix) for name in meta_sd)
+
+
+def _matrixgame_attn2_compat_target(
+    source_param_name: str,
+    target_param_name: str,
+    meta_sd: dict[str, Any],
+) -> tuple[str, int]:
+    """Remap old MatrixGame attn2 image-branch params onto single-route attn2.
+
+    Returns a `(target_name, priority)` pair. Higher priority wins when multiple
+    source tensors map to the same target tensor.
+    """
+    compat_suffix_map = {
+        ".attn2.add_k_proj.": ".attn2.to_k.",
+        ".attn2.add_v_proj.": ".attn2.to_v.",
+        ".attn2.norm_added_k.": ".attn2.norm_k.",
+        ".attn2.norm_added_q.": ".attn2.norm_q.",
+    }
+    base_suffix_map = {
+        ".attn2.to_k.": ".attn2.add_k_proj.",
+        ".attn2.to_v.": ".attn2.add_v_proj.",
+        ".attn2.norm_k.": ".attn2.norm_added_k.",
+        ".attn2.norm_q.": ".attn2.norm_added_q.",
+    }
+
+    for source_suffix, target_suffix in compat_suffix_map.items():
+        if source_suffix not in source_param_name:
+            continue
+        compat_target = target_param_name.replace(source_suffix, target_suffix)
+        # Only remap when the target model actually uses the single-route form.
+        if compat_target in meta_sd and target_param_name not in meta_sd:
+            return compat_target, 2
+        return target_param_name, 1
+
+    for source_suffix, add_suffix in base_suffix_map.items():
+        if source_suffix not in source_param_name:
+            continue
+        single_route_target = target_param_name
+        add_route_target = target_param_name.replace(source_suffix, add_suffix)
+        # Keep the checkpoint's original text-branch tensor as a lower-priority
+        # fallback when the target model has only the single-route form.
+        if single_route_target in meta_sd and add_route_target not in meta_sd:
+            return single_route_target, 1
+        return target_param_name, 1
+
+    return target_param_name, 1
+
+
+def _hf_to_custom_state_dict_with_meta_compat(
+    hf_param_sd: Generator[tuple[str, torch.Tensor], None, None],
+    param_names_mapping: Callable[[str], tuple[str, Any, Any]],
+    meta_sd: dict[str, Any],
+) -> tuple[dict[str, torch.Tensor], dict[str, tuple[str, Any, Any]]]:
+    """Convert state dict while resolving MatrixGame attn2 compatibility."""
+    custom_param_sd: dict[str, torch.Tensor] = {}
+    reverse_param_names_mapping: dict[str, tuple[str, Any, Any]] = {}
+    to_merge_params: dict[str, dict[int, tuple[torch.Tensor, int]]] = defaultdict(dict)
+    target_priorities: dict[str, int] = {}
+    merge_metadata: dict[str, tuple[str, Any, Any]] = {}
+
+    for source_param_name, full_tensor in hf_param_sd:
+        target_param_name, merge_index, num_params_to_merge = param_names_mapping(
+            source_param_name
+        )
+        target_param_name, priority = _matrixgame_attn2_compat_target(
+            source_param_name,
+            target_param_name,
+            meta_sd,
+        )
+        reverse_entry = (source_param_name, merge_index, num_params_to_merge)
+
+        if merge_index is not None:
+            to_merge_params[target_param_name][merge_index] = (full_tensor, priority)
+            merge_metadata[target_param_name] = reverse_entry
+            if len(to_merge_params[target_param_name]) != num_params_to_merge:
+                continue
+            sorted_tensors = [
+                to_merge_params[target_param_name][i][0]
+                for i in range(num_params_to_merge)
+            ]
+            full_tensor = torch.cat(sorted_tensors, dim=0)
+            priority = max(
+                to_merge_params[target_param_name][i][1]
+                for i in range(num_params_to_merge)
+            )
+            del to_merge_params[target_param_name]
+            reverse_entry = merge_metadata.pop(target_param_name)
+
+        previous_priority = target_priorities.get(target_param_name, -1)
+        if priority < previous_priority:
+            continue
+
+        custom_param_sd[target_param_name] = full_tensor
+        reverse_param_names_mapping[target_param_name] = reverse_entry
+        target_priorities[target_param_name] = priority
+
+    return custom_param_sd, reverse_param_names_mapping
 
 
 # TODO(PY): move this to utils elsewhere
@@ -293,8 +401,20 @@ def load_model_from_full_model_state_dict(
     """
     meta_sd = model.state_dict()
     sharded_sd = {}
-    custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
-        full_sd_iterator, param_names_mapping)  # type: ignore
+    if param_names_mapping is None:
+        custom_param_sd = dict(full_sd_iterator)
+        reverse_param_names_mapping = {
+            name: (name, None, None)
+            for name in custom_param_sd
+        }
+    else:
+        custom_param_sd, reverse_param_names_mapping = (
+            _hf_to_custom_state_dict_with_meta_compat(
+                full_sd_iterator,
+                param_names_mapping,
+                meta_sd,
+            )
+        )
     for target_param_name, full_tensor in custom_param_sd.items():
         if skip_param_loading is not None and skip_param_loading(
                 target_param_name):
@@ -303,6 +423,15 @@ def load_model_from_full_model_state_dict(
             continue
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
+            if _should_skip_missing_text_embedder_param(
+                    target_param_name,
+                    meta_sd,
+            ):
+                logger.info(
+                    "Skipping text embedder checkpoint key for text-free model: %s",
+                    target_param_name,
+                )
+                continue
             # Some checkpoints include extra entries that are not part of the
             # instantiated model's state_dict (e.g. `_extra_state` keys from
             # some FSDP checkpoint formats). These can be safely skipped.
