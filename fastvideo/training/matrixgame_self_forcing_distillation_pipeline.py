@@ -1,22 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
+import gc
+import os
 import sys
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Iterator, cast
 
+import imageio
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torchvision
 from einops import rearrange
+from torch.utils.data import DataLoader
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.dataloader.schema import (
     pyarrow_schema_matrixgame,
     pyarrow_schema_matrixgame_ode_trajectory)
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.distributed import get_local_torch_device, get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.vision_utils import load_video
 from fastvideo.models.dits.matrixgame.kv_cache import KVCache
 from fastvideo.models.schedulers.denoising_schedule import (
     build_block_denoising_steps, resolve_denoising_steps)
@@ -29,6 +36,10 @@ from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import 
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.self_forcing_distillation_pipeline import (
     SelfForcingDistillationPipeline)
+from fastvideo.training.ptlflow_validation import (
+    PTLFLOW_SCALAR_KEYS,
+    PTLFlowValidationHelper,
+)
 from fastvideo.training.training_utils import shift_timestep
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
@@ -1006,6 +1017,385 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=True)
+        self._ptlflow_validation = PTLFlowValidationHelper()
+
+    @torch.no_grad()
+    def _log_validation(self, transformer, training_args, global_step) -> None:
+        training_args.inference_mode = True
+        training_args.dit_cpu_offload = True
+        if not training_args.log_validation:
+            return
+        if self.validation_pipeline is None:
+            raise ValueError("Validation pipeline is not set")
+
+        logger.info("Starting validation")
+
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+
+        logger.info("Using validation seed: %s", self.seed)
+
+        logger.info(
+            "rank: %s: fastvideo_args.validation_dataset_file: %s",
+            self.global_rank,
+            training_args.validation_dataset_file,
+            local_main_process_only=False,
+        )
+        validation_dataset = ValidationDataset(
+            training_args.validation_dataset_file
+        )
+        validation_dataloader = DataLoader(
+            validation_dataset,
+            batch_size=None,
+            num_workers=0,
+        )
+
+        transformer.eval()
+        if hasattr(self, "transformer_2") and self.transformer_2 is not None:
+            self.transformer_2.eval()
+
+        use_ema_for_validation = (
+            self.training_args.use_ema and self.is_ema_ready(global_step)
+        )
+        ema_context = None
+        ema_2_context = None
+
+        if use_ema_for_validation:
+            logger.info("Using EMA model for validation")
+            validation_transformer = self.transformer
+            if self.generator_ema is not None:
+                ema_context = self.generator_ema.apply_to_model(
+                    validation_transformer
+                )
+
+            if (
+                hasattr(self, "transformer_2")
+                and self.transformer_2 is not None
+                and self.generator_ema_2 is not None
+            ):
+                ema_2_context = self.generator_ema_2.apply_to_model(
+                    self.transformer_2
+                )
+                logger.info("Using EMA_2 model for transformer_2 validation")
+
+        validation_steps = training_args.validation_sampling_steps.split(",")
+        validation_steps = [int(step) for step in validation_steps]
+        validation_steps = [step for step in validation_steps if step > 0]
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
+        evaluate_ptlflow = True
+
+        for num_inference_steps in validation_steps:
+            logger.info(
+                "rank: %s: num_inference_steps: %s",
+                self.global_rank,
+                num_inference_steps,
+                local_main_process_only=False,
+            )
+            step_videos: list[np.ndarray] = []
+            step_captions: list[str] = []
+            step_ref_videos: list[str | None] = []
+
+            def run_validation_with_ema(
+                steps: int,
+            ) -> tuple[
+                list[np.ndarray],
+                list[str],
+                list[str | None],
+                list[Any],
+                list[Any],
+                list[str | None],
+            ]:
+                videos: list[np.ndarray] = []
+                captions: list[str] = []
+                ref_videos: list[str | None] = []
+                audios: list[Any] = []
+                audio_sample_rates: list[Any] = []
+                action_paths: list[str | None] = []
+                for validation_batch in validation_dataloader:
+                    batch = self._prepare_validation_batch(
+                        sampling_param, training_args, validation_batch, steps
+                    )
+
+                    if hasattr(self.validation_pipeline, "prompt_encoding_stage"):
+                        negative_prompt = batch.negative_prompt
+                        batch_negative = ForwardBatch(
+                            data_type="video",
+                            prompt=negative_prompt,
+                            prompt_embeds=[],
+                            prompt_attention_mask=[],
+                        )
+                        result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore[attr-defined]
+                            batch_negative, training_args
+                        )
+                        (
+                            self.negative_prompt_embeds,
+                            self.negative_prompt_attention_mask,
+                        ) = (
+                            result_batch.prompt_embeds[0],
+                            result_batch.prompt_attention_mask[0],
+                        )
+                    else:
+                        self.negative_prompt_embeds = None
+                        self.negative_prompt_attention_mask = None
+
+                    logger.info(
+                        "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                        self.global_rank,
+                        self.rank_in_sp_group,
+                        batch.prompt,
+                        local_main_process_only=False,
+                    )
+
+                    assert batch.prompt is not None and isinstance(
+                        batch.prompt, str
+                    )
+                    captions.append(batch.prompt)
+                    ref_videos.append(validation_batch.get("ref_video"))
+
+                    with torch.no_grad():
+                        output_batch = self.validation_pipeline.forward(
+                            batch, training_args
+                        )
+                    samples = output_batch.output.cpu()
+                    if self.rank_in_sp_group != 0:
+                        continue
+
+                    action_path = validation_batch.get("action_path")
+                    if not isinstance(action_path, str):
+                        action_path = None
+
+                    video = rearrange(samples, "b c t h w -> t b c h w")
+                    frames = []
+                    for x in video:
+                        x = torchvision.utils.make_grid(x, nrow=6)
+                        x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                        frames.append((x * 255).numpy().astype(np.uint8))
+                    frames = self._post_process_validation_frames(frames, batch)
+                    videos.append(frames)
+                    action_paths.append(action_path)
+                    audios.append(output_batch.extra.get("audio"))
+                    audio_sample_rates.append(
+                        output_batch.extra.get("audio_sample_rate")
+                    )
+
+                return (
+                    videos,
+                    captions,
+                    ref_videos,
+                    audios,
+                    audio_sample_rates,
+                    action_paths,
+                )
+
+            if ema_context is not None and ema_2_context is not None:
+                with ema_context, ema_2_context:
+                    (
+                        step_videos,
+                        step_captions,
+                        step_ref_videos,
+                        step_audios,
+                        step_audio_sample_rates,
+                        step_action_paths,
+                    ) = run_validation_with_ema(num_inference_steps)
+            elif ema_context is not None:
+                with ema_context:
+                    (
+                        step_videos,
+                        step_captions,
+                        step_ref_videos,
+                        step_audios,
+                        step_audio_sample_rates,
+                        step_action_paths,
+                    ) = run_validation_with_ema(num_inference_steps)
+            elif ema_2_context is not None:
+                with ema_2_context:
+                    (
+                        step_videos,
+                        step_captions,
+                        step_ref_videos,
+                        step_audios,
+                        step_audio_sample_rates,
+                        step_action_paths,
+                    ) = run_validation_with_ema(num_inference_steps)
+            else:
+                (
+                    step_videos,
+                    step_captions,
+                    step_ref_videos,
+                    step_audios,
+                    step_audio_sample_rates,
+                    step_action_paths,
+                ) = run_validation_with_ema(num_inference_steps)
+
+            world_group = get_world_group()
+            num_sp_groups = world_group.world_size // self.sp_group.world_size
+
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    all_videos = step_videos
+                    all_captions = step_captions
+                    all_ref_videos = step_ref_videos
+                    all_audios = step_audios
+                    all_audio_sample_rates = step_audio_sample_rates
+                    all_action_paths = list(step_action_paths)
+
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        recv_ref_videos = world_group.recv_object(src=src_rank)
+                        recv_audios = world_group.recv_object(src=src_rank)
+                        recv_audio_sample_rates = world_group.recv_object(
+                            src=src_rank
+                        )
+                        recv_action_paths = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
+                        all_ref_videos.extend(recv_ref_videos)
+                        all_audios.extend(recv_audios)
+                        all_audio_sample_rates.extend(recv_audio_sample_rates)
+                        all_action_paths.extend(recv_action_paths)
+
+                    video_filenames = []
+                    for i, (video, caption, audio, audio_sample_rate) in enumerate(
+                        zip(
+                            all_videos,
+                            all_captions,
+                            all_audios,
+                            all_audio_sample_rates,
+                            strict=True,
+                        )
+                    ):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4",
+                        )
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        if (
+                            audio is not None
+                            and audio_sample_rate is not None
+                            and not self._mux_audio(
+                                filename, audio, audio_sample_rate
+                            )
+                        ):
+                            logger.warning(
+                                "Audio mux failed for validation video %s; saved video without audio.",
+                                filename,
+                            )
+                        video_filenames.append(filename)
+
+                    artifacts = []
+                    for filename, caption in zip(
+                        video_filenames,
+                        all_captions,
+                        strict=True,
+                    ):
+                        video_artifact = self.tracker.video(filename, caption=caption)
+                        if video_artifact is not None:
+                            artifacts.append(video_artifact)
+                    if artifacts:
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps": artifacts
+                        }
+                        self.tracker.log_artifacts(logs, global_step)
+                    if not self.validation_ref_videos_logged:
+                        ref_artifacts = []
+                        for filename, caption in zip(
+                            all_ref_videos,
+                            all_captions,
+                            strict=True,
+                        ):
+                            if filename is None:
+                                continue
+                            ref_frames = np.stack(
+                                [
+                                    np.asarray(frame)
+                                    for frame in load_video(filename)
+                                ],
+                                axis=0,
+                            )
+                            ref_frames = np.ascontiguousarray(
+                                ref_frames.transpose(0, 3, 1, 2)
+                            )
+                            video_artifact = self.tracker.video(
+                                ref_frames,
+                                caption=caption,
+                                fps=sampling_param.fps,
+                            )
+                            if video_artifact is not None:
+                                ref_artifacts.append(video_artifact)
+                        if ref_artifacts:
+                            self.tracker.log_artifacts(
+                                {"validation_ref_videos": ref_artifacts},
+                                global_step,
+                            )
+                            self.validation_ref_videos_logged = True
+
+                    if evaluate_ptlflow:
+                        self._ptlflow_validation.initialize(training_args)
+                        if not self._ptlflow_validation.ready:
+                            logger.warning(
+                                "PTLFlow evaluation is enabled but evaluator initialization failed. "
+                                "Skipping flow metrics for this validation run."
+                            )
+                        else:
+                            metric_sums = {key: 0.0 for key in PTLFLOW_SCALAR_KEYS}
+                            metric_counts = {key: 0.0 for key in PTLFLOW_SCALAR_KEYS}
+                            for filename, action_path in zip(
+                                video_filenames,
+                                all_action_paths,
+                                strict=True,
+                            ):
+                                try:
+                                    sample_metrics = (
+                                        self._ptlflow_validation.evaluate_video(
+                                            video_path=filename,
+                                            action_path=action_path,
+                                            global_step=global_step,
+                                            num_inference_steps=num_inference_steps,
+                                            training_args=training_args,
+                                        )
+                                    )
+                                    for key in PTLFLOW_SCALAR_KEYS:
+                                        val = sample_metrics.get(key)
+                                        if not isinstance(
+                                            val,
+                                            (float, int, np.floating, np.integer),
+                                        ):
+                                            continue
+                                        val_float = float(val)
+                                        if not np.isfinite(val_float):
+                                            continue
+                                        metric_sums[key] += val_float
+                                        metric_counts[key] += 1.0
+                                finally:
+                                    self._ptlflow_validation.release_cuda_memory()
+
+                            metric_logs: dict[str, float] = {}
+                            for metric_key in PTLFLOW_SCALAR_KEYS:
+                                count = metric_counts[metric_key]
+                                if count <= 0:
+                                    continue
+                                value = float(metric_sums[metric_key] / count)
+                                if not np.isfinite(value):
+                                    continue
+                                metric_logs[f"metrics/{metric_key}"] = value
+                            if metric_logs:
+                                self.tracker.log(metric_logs, global_step)
+                else:
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
+                    world_group.send_object(step_ref_videos, dst=0)
+                    world_group.send_object(step_audios, dst=0)
+                    world_group.send_object(step_audio_sample_rates, dst=0)
+                    world_group.send_object(step_action_paths, dst=0)
+
+        transformer.train()
+        if hasattr(self, "transformer_2") and self.transformer_2 is not None:
+            self.transformer_2.train()
+        gc.collect()
+        torch.cuda.empty_cache()
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore

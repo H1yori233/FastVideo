@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import sys
 import os
 from copy import deepcopy
 from typing import Any
@@ -8,6 +9,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
+from einops import rearrange
 from torch.utils.data import DataLoader
 
 from fastvideo.configs.sample import SamplingParam
@@ -327,7 +329,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         validation_steps = [step for step in validation_steps if step > 0]
         world_group = get_world_group()
         num_sp_groups = world_group.world_size // self.sp_group.world_size
-        evaluate_ptlflow = bool(getattr(training_args, "evaluate_ptlflow", False))
+        evaluate_ptlflow = True
 
         for num_inference_steps in validation_steps:
             logger.info(
