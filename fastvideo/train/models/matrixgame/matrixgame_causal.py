@@ -471,6 +471,7 @@ class MatrixGameCausalModel(MatrixGameModel, WanCausalModel):
                     k=cache.k,
                     v=cache.v,
                     length=cache.length.detach().clone(),
+                    sink_size=cache.sink_size,
                 )
             )
         return snapshot

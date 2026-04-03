@@ -188,6 +188,11 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             raise ValueError(
                 "MatrixGame self-forcing requires transformer.local_attn_size > 0"
             )
+        self.sink_size = getattr(self.transformer, "sink_size", -1)
+        if self.sink_size <= 0:
+            raise ValueError(
+                "MatrixGame self-forcing requires transformer.sink_size > 0"
+            )
         self.vae_time_compression_ratio = int(
             self.action_config.get("vae_time_compression_ratio", 4)
         )
@@ -613,6 +618,7 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
                     cache_size=kv_cache_size,
                     num_heads=num_attention_heads,
                     head_dim=attention_head_dim,
+                    sink_size=self.sink_size * frame_seq_length,
                     dtype=dtype,
                     device=device,
                 ))
