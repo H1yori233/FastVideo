@@ -51,6 +51,7 @@ from .kv_cache import (
 from .model import MatrixGameCrossAttention
 
 logger = init_logger(__name__)
+ENABLE_INFINITY_ROPE = True
 
 
 def causal_rope_apply(
@@ -209,14 +210,13 @@ class CausalMatrixGameSelfAttention(nn.Module):
 
         freqs = self._freqs_cache
 
-        roped_query = causal_rope_apply(
-            q, grid_sizes, freqs, start_frame=start_frame
-        ).type_as(v)
-        roped_key = causal_rope_apply(
-            k, grid_sizes, freqs, start_frame=start_frame
-        ).type_as(v)
-
         if kv_cache is None:
+            roped_query = causal_rope_apply(
+                q, grid_sizes, freqs, start_frame=start_frame
+            ).type_as(v)
+            roped_key = causal_rope_apply(
+                k, grid_sizes, freqs, start_frame=start_frame
+            ).type_as(v)
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
             padded_roped_query = torch.cat(
                 [
@@ -277,20 +277,67 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 if self.local_attn_size == -1
                 else self.local_attn_size * frame_seqlen
             )
-            x = attend_with_kv_cache(
-                q=roped_query,
-                new_k=roped_key,
-                new_v=v,
-                kv_cache=kv_cache,
-                max_attn_size=max_attention_size,
-                attend_fn=lambda q_t, k_t, v_t: torch.nn.functional.scaled_dot_product_attention(
-                    q_t.transpose(1, 2),
-                    k_t.transpose(1, 2),
-                    v_t.transpose(1, 2),
-                ).transpose(1, 2),
-                update_kv_cache=update_kv_cache,
-                num_new_tokens=roped_query.shape[1],
-            )
+            if not ENABLE_INFINITY_ROPE or grid_sizes is None:
+                roped_query = causal_rope_apply(
+                    q, grid_sizes, freqs, start_frame=start_frame
+                ).type_as(v)
+                roped_key = causal_rope_apply(
+                    k, grid_sizes, freqs, start_frame=start_frame
+                ).type_as(v)
+                x = attend_with_kv_cache(
+                    q=roped_query,
+                    new_k=roped_key,
+                    new_v=v,
+                    kv_cache=kv_cache,
+                    max_attn_size=max_attention_size,
+                    attend_fn=lambda q_t, k_t, v_t: torch.nn.functional.scaled_dot_product_attention(
+                        q_t.transpose(1, 2),
+                        k_t.transpose(1, 2),
+                        v_t.transpose(1, 2),
+                    ).transpose(1, 2),
+                    update_kv_cache=update_kv_cache,
+                    num_new_tokens=q.shape[1],
+                )
+            else:
+                num_new_tokens = q.shape[1]
+                num_new_frames = num_new_tokens // frame_seqlen
+                if update_kv_cache:
+                    k_for_attn, v_for_attn = kv_cache.update(
+                        k,
+                        v,
+                        max_attention_size,
+                        num_new_tokens=num_new_tokens,
+                    )
+                else:
+                    k_for_attn, v_for_attn = kv_cache.get_view(
+                        k,
+                        v,
+                        max_attention_size,
+                        num_new_tokens=num_new_tokens,
+                    )
+
+                window_frames = k_for_attn.shape[1] // frame_seqlen
+                window_grid_sizes = (window_frames, grid_sizes[1], grid_sizes[2])
+                relative_start_frame = max(0, window_frames - num_new_frames)
+
+                roped_query = causal_rope_apply(
+                    q,
+                    grid_sizes,
+                    freqs,
+                    start_frame=relative_start_frame,
+                ).type_as(v)
+                roped_key = causal_rope_apply(
+                    k_for_attn,
+                    window_grid_sizes,
+                    freqs,
+                    start_frame=0,
+                ).type_as(v)
+
+                x = torch.nn.functional.scaled_dot_product_attention(
+                    roped_query.transpose(1, 2),
+                    roped_key.transpose(1, 2),
+                    v_for_attn.transpose(1, 2),
+                ).transpose(1, 2)
 
         return x
 

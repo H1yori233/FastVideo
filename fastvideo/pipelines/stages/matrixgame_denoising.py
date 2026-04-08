@@ -102,7 +102,15 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                            -1)
         except Exception:
             self.local_attn_size = -1
-        self.sink_size = int(getattr(self.transformer, "sink_size", 0))
+        _arch = getattr(getattr(self.transformer, "config", None),
+                        "arch_config", None)
+        self.sink_size = int(
+            getattr(
+                _arch,
+                "sink_size",
+                getattr(self.transformer, "sink_size", 0),
+            ) if _arch is not None else getattr(self.transformer, "sink_size", 0))
+        logger.info(f"sink_size: {self.sink_size}")
 
         assert self.local_attn_size != -1, (
             f"local_attn_size must be set for Matrix-Game causal inference, "
