@@ -92,3 +92,10 @@ preprocess_output/
 finetune_i2v_output/
 finetune_df_output/
 sf_train_output/
+
+video_samples_attn_full_context/
+video_samples_attn_sweep/
+video_samples_attn_sweep_inf.rope/
+video_samples_attn_sweep_mg/
+video_samples_attn_sweep_mg_inf.rope/
+video_samples_matrixgame2/
