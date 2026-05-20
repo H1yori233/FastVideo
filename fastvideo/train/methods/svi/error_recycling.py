@@ -114,10 +114,7 @@ class GridBinner:
         self.reference_timesteps = self.reference_timesteps.detach().to("cpu", torch.float32).contiguous()
 
     def __call__(self, timestep: torch.Tensor | float) -> int:
-        if isinstance(timestep, torch.Tensor):
-            val = float(timestep.flatten()[0].item())
-        else:
-            val = float(timestep)
+        val = float(timestep.flatten()[0].item()) if isinstance(timestep, torch.Tensor) else float(timestep)
         val = max(0.0, min(val, 999.0))
         return int((self.reference_timesteps - val).abs().argmin().item())
 

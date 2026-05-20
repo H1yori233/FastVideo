@@ -333,8 +333,7 @@ class SVITrainingMethod(TrainingMethod):
     # ------------------------------------------------------------------
 
     @torch.no_grad()
-    def _encode_text(self, text: str, *, device: torch.device,
-                     dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+    def _encode_text(self, text: str, *, device: torch.device, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
         student = self.student
         pipeline_config = self.training_config.pipeline_config
         encoder_config = pipeline_config.text_encoder_configs[0]

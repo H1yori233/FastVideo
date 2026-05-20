@@ -132,7 +132,7 @@ class SVIRawVideoDataset(Dataset):
     def _read_csv(csv_path: str) -> dict[str, str]:
         out: dict[str, str] = {}
         try:
-            with open(csv_path, "r", encoding="utf-8") as f:
+            with open(csv_path, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     name = row.get("Filename")
@@ -194,7 +194,7 @@ class SVIRawVideoDataset(Dataset):
         try:
             reader = imageio.get_reader(video_file)
             total_frames = reader.count_frames()
-        except (OSError, IOError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             logger.warning("SVIRawVideoDataset: failed to read %s (%s); retrying random", video_file, exc)
             return self.__getitem__(random.randint(0, len(self.video_list) - 1))
 

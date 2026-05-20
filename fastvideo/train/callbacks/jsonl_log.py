@@ -56,7 +56,7 @@ class JSONLLogCallback(Callback):
             return
         path = self._resolve_path()
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        self._fp = open(path, "a", encoding="utf-8")
+        self._fp = open(path, "a", encoding="utf-8")  # noqa: SIM115 — kept open across hooks; closed in on_train_end
         logger.info("JSONLLogCallback: writing to %s", path)
 
     def on_training_step_end(
