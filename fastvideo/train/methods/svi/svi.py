@@ -145,6 +145,9 @@ class SVITrainingMethod(TrainingMethod):
         self,
         batch: dict[str, Any],
         iteration: int,
+        *,
+        _test_fixture: dict[str, Any] | None = None,
+        _test_capture: dict[str, Any] | None = None,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
         device = self.student.device
         dtype = self.student._get_training_dtype()
@@ -157,9 +160,14 @@ class SVITrainingMethod(TrainingMethod):
 
         # ----- Text encode (frozen) -----
         encoder_hidden_states, encoder_attention_mask = self._encode_text(text, device=device, dtype=dtype)
+        if _test_capture is not None:
+            _test_capture["prompt_emb_context"] = encoder_hidden_states.detach().cpu()
+            _test_capture["prompt_emb_mask"] = encoder_attention_mask.detach().cpu()
 
         # ----- VAE encode video -> clean latents -----
         clean_latents = self._vae_encode(video).to(dtype=dtype)  # [B, 16, T_lat, H_lat, W_lat]
+        if _test_capture is not None:
+            _test_capture["clean_latents"] = clean_latents.detach().cpu()
 
         # ----- Pick motion frames (probabilistic, matches upstream) -----
         first_refs_pil = [PIL.Image.fromarray(t.cpu().to(torch.uint8).numpy()) for t in first_ref_frames_per_sample[0]]
@@ -177,11 +185,18 @@ class SVITrainingMethod(TrainingMethod):
             device=device,
             dtype=dtype,
         )
+        if _test_capture is not None:
+            _test_capture["clip_feature"] = clip_feature.detach().cpu()
+            _test_capture["y"] = y.detach().cpu()
 
-        # ----- Sample noise + timestep -----
-        gen = self.cuda_generator
-        noise = torch.randn(clean_latents.shape, generator=gen, device=device, dtype=clean_latents.dtype)
-        timestep_id = torch.randint(0, int(self.student.num_train_timesteps), (1, ), generator=gen, device=device)
+        # ----- Sample noise + timestep (fixture overrides RNG when supplied) -----
+        if _test_fixture is not None:
+            noise = _test_fixture["noise"].to(device=device, dtype=clean_latents.dtype)
+            timestep_id = _test_fixture["timestep_id"].to(device=device).reshape(1)
+        else:
+            gen = self.cuda_generator
+            noise = torch.randn(clean_latents.shape, generator=gen, device=device, dtype=clean_latents.dtype)
+            timestep_id = torch.randint(0, int(self.student.num_train_timesteps), (1, ), generator=gen, device=device)
         timestep = self.student.noise_scheduler.timesteps.to(device=device)[timestep_id].to(dtype=torch.float32)
 
         # ----- Error Recycling: inject sampled errors before add_noise -----
@@ -224,6 +239,9 @@ class SVITrainingMethod(TrainingMethod):
             timestep,
         )
         noisy_latents = noisy_clean_2d.unflatten(0, (bsz, t_lat)).permute(0, 2, 1, 3, 4).contiguous()
+        if _test_capture is not None:
+            _test_capture["noisy_latents"] = noisy_latents.detach().cpu()
+            _test_capture["timestep_actual"] = timestep.detach().cpu()
 
         # ----- Build transformer input: hidden_states is [B, 16+20, T_lat, H_lat, W_lat] -----
         hidden_states = torch.cat([noisy_latents, y], dim=1).to(dtype=dtype)
@@ -249,7 +267,14 @@ class SVITrainingMethod(TrainingMethod):
         # The self-correction trains the model to pull a corrupted noisy_latents back to the clean manifold.
         target = (noise_w_error - clean_latents).to(dtype=pred.dtype)
         weight = self._training_weights.to(device=device, dtype=torch.float32)[timestep_id.cpu().item()]
-        loss = F.mse_loss(pred.float(), target.float()) * float(weight)
+        loss_unweighted = F.mse_loss(pred.float(), target.float())
+        loss = loss_unweighted * float(weight)
+        if _test_capture is not None:
+            _test_capture["pred"] = pred.detach().cpu()
+            _test_capture["target"] = target.detach().cpu()
+            _test_capture["loss_unweighted"] = loss_unweighted.detach().cpu()
+            _test_capture["training_weight"] = torch.tensor(float(weight))
+            _test_capture["loss"] = loss.detach().cpu()
 
         # ----- Post-loss: push step errors to ER buffers -----
         if er is not None:
@@ -369,13 +394,36 @@ class SVITrainingMethod(TrainingMethod):
     def _vae_encode_condition_video(self, condition_video: torch.Tensor) -> torch.Tensor:
         return self._vae_encode(condition_video)
 
+    # OpenCLIP-style normalization stats used by both upstream and HF CLIP.
+    _CLIP_MEAN: tuple[float, float, float] = (0.48145466, 0.4578275, 0.40821073)
+    _CLIP_STD: tuple[float, float, float] = (0.26862954, 0.26130258, 0.27577711)
+
     @torch.no_grad()
     def _clip_encode(self, image: PIL.Image.Image, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        """CLIP image encode that mirrors upstream's preprocessing.
+
+        Upstream (``diffsynth.WanImageEncoder.encode_image``) bypasses the
+        HF ``CLIPImageProcessor``: it bicubic-squashes the input directly to
+        224×224 (no center crop, no aspect preservation), normalizes by
+        CLIP-ViT-H/14 mean/std, then truncates to layer 31. To get
+        per-step numerical parity with that pipeline we replicate the same
+        preprocessing here.
+        """
+        import numpy as np
+
         student = self.student
         student.image_encoder = student.image_encoder.to(device).eval()
-        inputs = student.image_processor(images=image, return_tensors="pt").to(device)
+
+        arr = np.asarray(image.convert("RGB"), dtype=np.float32) / 127.5 - 1.0  # [H, W, 3] in [-1, 1]
+        t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=torch.float32)
+        t = F.interpolate(t, size=(224, 224), mode="bicubic", align_corners=False)
+        t = t.mul(0.5).add(0.5)  # [-1, 1] -> [0, 1]
+        mean = torch.tensor(self._CLIP_MEAN, device=device, dtype=t.dtype).view(1, 3, 1, 1)
+        std = torch.tensor(self._CLIP_STD, device=device, dtype=t.dtype).view(1, 3, 1, 1)
+        t = (t - mean) / std
+
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            outputs = student.image_encoder(**inputs)
+            outputs = student.image_encoder(pixel_values=t)
         return outputs.last_hidden_state.to(dtype=dtype)
 
     @staticmethod

@@ -141,27 +141,33 @@ To round-trip a saved LoRA into inference, see
 
 ## Parity check vs upstream
 
-The `train_log.jsonl` schema is intentionally simple so a matching trace can
-be captured from upstream `train_svi.py` (via a Lightning callback that
-appends `{step, train_loss, ...}` rows). Then:
+Diffusion training loss is a useless parity signal — its absolute value
+bounces with the sampled timestep's sigma, so correlating loss across two
+runs is dominated by sampling noise. Visual quality after 200 steps × 4 toy
+clips also can't distinguish "algorithm matches upstream" from "both LoRAs
+are still close to random init". The real parity gate is **single-step
+numerical alignment**: feed both implementations the same inputs and check
+every intermediate tensor.
 
 ```bash
-python -m fastvideo.tests.svi.parity_check \
-  --a outputs/wan_svi_lora/train_log.jsonl \
-  --b /path/to/upstream/train_log.jsonl \
-  --loss-key total_loss \
-  --limit 200 \
-  --min-correlation 0.97
+# 1. Dump upstream's step-1 fixture (single GPU, ~3 min)
+CUDA_VISIBLE_DEVICES=0 python .agents/exploration/svi-training/dump_step1_upstream.py \
+    --output outputs/parity_fixture/step01 --seed 42
+
+# 2. Run the FV-side comparator (single GPU, ~1 min)
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --master_port=29504 \
+    -m pytest fastvideo/tests/svi/test_step1_parity.py -v -s
 ```
 
-Reports Pearson correlation on the chosen loss series. The verification
-gate is correlation ≥ 0.97 over the first 200 steps under matched
-seeds / data / hyperparams.
-
-Capturing the upstream trace is currently a manual step; the SVI repo lives
-at `/home/hal-kaiqin/FastVideo_SVI/Stable-Video-Infinity/` on this
-workstation and its `train_svi.py` can be hooked with a small
-`pl.Callback` that dumps `self.log("train_loss", …)` values to JSONL.
+The comparator builds `SVITrainingMethod` with `use_error_recycling=False`,
+loads upstream's step-0 LoRA init into the FV transformer, replays
+upstream's exact noise / timestep / batch via `_test_fixture=`, then asserts
+each captured intermediate (`prompt_emb_context`, `clip_feature`,
+`clean_latents`, `y`, `noisy_latents`, `target`, `pred`, `loss`,
+`timestep_actual`) lands within an `atol`+`rtol`+`max_mean_drift_pct` envelope.
+Tolerances bound the mean drift tightly (≤2% for VAE-derived tensors, ≤5%
+for the transformer prediction) and leave room for cross-implementation
+fp drift on individual elements.
 
 ## Troubleshooting
 

@@ -128,3 +128,4 @@ apps/dreamverse/web/.env.production.local
 .sisyphus/
 openspec/
 fastvideo/tests/ssim/reference_videos/**
+models/
