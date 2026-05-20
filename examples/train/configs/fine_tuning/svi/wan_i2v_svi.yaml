@@ -1,0 +1,99 @@
+# Stable-Video-Infinity LoRA finetune on Wan 2.1 I2V 14B 480P.
+#
+# Matches upstream train_svi.py defaults by design (see
+# Stable-Video-Infinity/train_svi.py:20-365). The method and model classes
+# referenced below land in later stages of the port; this YAML is in tree
+# from Stage 1 to anchor the data block.
+
+models:
+  student:
+    # Stage 2 will add WanSVIModel; for Stage 1 the dataset stands alone.
+    _target_: fastvideo.train.models.wan.wan_svi.WanSVIModel
+    init_from: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
+    trainable: true
+    flow_shift: 5.0
+    lora:
+      enable: true
+      rank: 128
+      alpha: 128
+      target_modules:
+        - q
+        - k
+        - v
+        - o
+        - ffn.0
+        - ffn.2
+
+method:
+  _target_: fastvideo.train.methods.svi.svi.SVITrainingMethod
+  # SVI dataset knobs (consumed when building the raw-video dataloader).
+  frame_interval: 1
+  num_ref_frames: 12
+  crop_jitter_frac: 0.0714        # 1/14, matches upstream
+  # SVI y-conditioning knobs.
+  num_motion_frames: 1            # 1 = Shot/Tom, 5 = Film
+  ref_pad_num: -1                 # -1=tile ref; 0=zero pad; k>0=ref for first k slots
+  ref_pad_cfg: false
+  p_motion_threshold: 0.5
+  repeat_first_frame: true
+  # Error recycling is parked for Stage 5; keep defaults aligned with upstream.
+  use_error_recycling: false
+  error_buffer_k: 500
+  num_grids: 50
+  timestep_grid_size: 25
+  buffer_warmup_iter: 50
+  buffer_replacement_strategy: random  # random | fifo | l2_batch | l2_similarity
+  noise_prob: 0.5
+  y_prob: 0.5
+  latent_prob: 0.5
+  clean_buffer_update_prob: 0.1
+
+training:
+  distributed:
+    num_gpus: 1
+    sp_size: 1
+    tp_size: 1
+    hsdp_replicate_dim: 1
+    hsdp_shard_dim: 1
+
+  data:
+    data_path: data/svi_train
+    dataloader_num_workers: 2
+    train_batch_size: 1
+    seed: 42
+    num_frames: 81
+    num_height: 480
+    num_width: 832
+    num_latent_t: 21          # (81 - 1) / 4 + 1
+
+  optimizer:
+    learning_rate: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+    lr_scheduler: constant
+    lr_warmup_steps: 0
+
+  loop:
+    max_train_steps: 10000
+    gradient_accumulation_steps: 1
+
+  checkpoint:
+    output_dir: outputs/wan_svi_lora
+    training_state_checkpointing_steps: 100
+    checkpoints_total_limit: 5
+    resume_from_checkpoint: null
+
+  tracker:
+    project_name: fastvideo
+    run_name: wan_svi_lora
+
+  model:
+    enable_gradient_checkpointing_type: full
+
+callbacks:
+  grad_clip:
+    _target_: fastvideo.train.callbacks.grad_clip.GradNormClipCallback
+    max_grad_norm: 1.0
+
+pipeline:
+  flow_shift: 5.0
