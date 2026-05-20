@@ -106,5 +106,9 @@ callbacks:
     output_subdir: lora
     also_save_last_as: last.safetensors
 
+  jsonl_log:
+    _target_: fastvideo.train.callbacks.jsonl_log.JSONLLogCallback
+    flush_every: 1
+
 pipeline:
   flow_shift: 5.0

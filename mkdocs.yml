@@ -140,6 +140,7 @@ nav:
     - Training Infrastructure: training/train_infra.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
+    - Stable-Video-Infinity: training/svi.md
     - Examples:
       - Training Index: training/examples/examples_training_index.md
       - Wan T2V 1.3B: training/examples/wan_t2v_1.3B.md
