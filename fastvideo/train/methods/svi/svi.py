@@ -19,6 +19,12 @@ import torch.nn.functional as F
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
+from fastvideo.train.methods.svi.error_recycling import (
+    ErrorRecyclingConfig,
+    ErrorRecyclingState,
+    compute_step_errors,
+    sigma_at,
+)
 from fastvideo.train.models.base import ModelBase
 from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
 
@@ -55,7 +61,7 @@ class SVITrainingMethod(TrainingMethod):
         self.num_motion_frames = int(mc.get("num_motion_frames", 1))
         self.ref_pad_num = int(mc.get("ref_pad_num", -1))
         self.ref_pad_cfg = bool(mc.get("ref_pad_cfg", False))
-        self.p_motion_threshold = float(mc.get("p_motion_threshold", 0.5))
+        self.p_motion_threshold = float(mc.get("p_motion_threshold", 0.9))
         self.repeat_first_frame = bool(mc.get("repeat_first_frame", True))
 
         self.student.init_preprocessors(self.training_config)
@@ -65,6 +71,34 @@ class SVITrainingMethod(TrainingMethod):
         # which produces a bell-curve over the full timestep range — we precompute it once.
         num_train = int(self.student.num_train_timesteps)
         self.register_buffer("_training_weights", _compute_bell_weights(num_train), persistent=False)
+
+        # Error Recycling (Stage 5). Disabled by default; enable in YAML with
+        # ``method.use_error_recycling: true``.
+        self.use_error_recycling = bool(mc.get("use_error_recycling", False))
+        if self.use_error_recycling:
+            self._er = ErrorRecyclingState(
+                ErrorRecyclingConfig(
+                    enabled=True,
+                    error_buffer_k=int(mc.get("error_buffer_k", 500)),
+                    num_grids=int(mc.get("num_grids", 50)),
+                    flow_shift=float(self.student.timestep_shift),
+                    buffer_warmup_iter=int(mc.get("buffer_warmup_iter", 50)),
+                    buffer_replacement_strategy=str(mc.get("buffer_replacement_strategy", "random")),
+                    noise_prob=float(mc.get("noise_prob", 0.99)),
+                    y_prob=float(mc.get("y_prob", 0.99)),
+                    latent_prob=float(mc.get("latent_prob", 0.99)),
+                    clean_prob=float(mc.get("clean_prob", 0.1)),
+                    clean_buffer_update_prob=float(mc.get("clean_buffer_update_prob", 0.5)),
+                    error_modulate_factor=float(mc.get("error_modulate_factor", 0.0)),
+                    y_error_num=int(mc.get("y_error_num", 1)),
+                ),
+                num_train_timesteps=num_train,
+            )
+            logger.info("Error Recycling enabled (warmup=%d, num_grids=%d, k=%d, strategy=%s)",
+                        self._er.cfg.buffer_warmup_iter, self._er.cfg.num_grids, self._er.cfg.error_buffer_k,
+                        self._er.cfg.buffer_replacement_strategy)
+        else:
+            self._er = None
 
     # ------------------------------------------------------------------
     # TrainingMethod abstract overrides
@@ -112,7 +146,6 @@ class SVITrainingMethod(TrainingMethod):
         batch: dict[str, Any],
         iteration: int,
     ) -> tuple[dict[str, torch.Tensor], dict[str, Any], dict[str, LogScalar]]:
-        del iteration
         device = self.student.device
         dtype = self.student._get_training_dtype()
 
@@ -151,15 +184,43 @@ class SVITrainingMethod(TrainingMethod):
         timestep_id = torch.randint(0, int(self.student.num_train_timesteps), (1, ), generator=gen, device=device)
         timestep = self.student.noise_scheduler.timesteps.to(device=device)[timestep_id].to(dtype=torch.float32)
 
+        # ----- Error Recycling: inject sampled errors before add_noise -----
+        noise_w_error = noise
+        latents_w_error = clean_latents
+        er = self._er
+        use_clean_input = False
+        injected = {"noise": False, "y": False, "latent": False}
+        if er is not None:
+            grid_idx = er.binner(timestep)
+            inj_noise, inj_y, inj_latent, use_clean_input = er.roll()
+            if inj_noise:
+                e = er.sample_noise_error(grid_idx, clean_latents)
+                if e is not None:
+                    noise_w_error = noise + e.to(noise.dtype)
+                    injected["noise"] = True
+            if inj_y:
+                e = er.sample_y_error(grid_idx, clean_latents)
+                if e is not None:
+                    # Upstream injects only into y[:, 4:, :y_error_num, ...] (the VAE-encoded slice
+                    # of the motion-frame conditioning).
+                    n = min(int(er.cfg.y_error_num), e.shape[2], y.shape[2])
+                    max_start = max(0, e.shape[2] - n)
+                    start = random.randint(0, max_start) if max_start > 0 else 0
+                    slab = e[:, :, start:start + n, ...].to(y.dtype)
+                    y = y.clone()
+                    y[:, 4:, :n, ...] = y[:, 4:, :n, ...] + slab
+                    injected["y"] = True
+            if inj_latent:
+                e = er.sample_latent_error(grid_idx, clean_latents)
+                if e is not None:
+                    latents_w_error = clean_latents + e.to(clean_latents.dtype)
+                    injected["latent"] = True
+
         # ----- add_noise (uses scheduler's discrete sigma lookup) -----
-        # FV scheduler's add_noise expects [B, C, H, W]; flatten temporal dim per WanModel convention.
-        bsz, ch, t_lat, h_lat, w_lat = clean_latents.shape
-        clean_flat = clean_latents.flatten(0, 1) if clean_latents.ndim == 5 else clean_latents
-        noise_flat = noise.flatten(0, 1) if noise.ndim == 5 else noise
-        # add_noise with 5D directly — Wan path does this via add_noise on [B*T, C, H, W].
+        bsz, _, t_lat, _, _ = clean_latents.shape
         noisy_clean_2d = self.student.noise_scheduler.add_noise(
-            clean_latents.permute(0, 2, 1, 3, 4).flatten(0, 1).contiguous(),  # [B*T_lat, C, H, W]
-            noise.permute(0, 2, 1, 3, 4).flatten(0, 1).contiguous(),
+            latents_w_error.permute(0, 2, 1, 3, 4).flatten(0, 1).contiguous(),  # [B*T_lat, C, H, W]
+            noise_w_error.permute(0, 2, 1, 3, 4).flatten(0, 1).contiguous(),
             timestep,
         )
         noisy_latents = noisy_clean_2d.unflatten(0, (bsz, t_lat)).permute(0, 2, 1, 3, 4).contiguous()
@@ -184,17 +245,68 @@ class SVITrainingMethod(TrainingMethod):
         if isinstance(pred, tuple):
             pred = pred[0]
 
-        target = (noise - clean_latents).to(dtype=pred.dtype)
+        # Upstream: training_target = noise_w_error - latents (note: CLEAN latents, not _w_error).
+        # The self-correction trains the model to pull a corrupted noisy_latents back to the clean manifold.
+        target = (noise_w_error - clean_latents).to(dtype=pred.dtype)
         weight = self._training_weights.to(device=device, dtype=torch.float32)[timestep_id.cpu().item()]
         loss = F.mse_loss(pred.float(), target.float()) * float(weight)
+
+        # ----- Post-loss: push step errors to ER buffers -----
+        if er is not None:
+            self._update_error_buffers(
+                noise_pred=pred,
+                training_target=target,
+                timestep=timestep,
+                iteration=iteration,
+                use_clean_input=use_clean_input,
+            )
 
         loss_map = {"total_loss": loss, "svi_loss": loss}
         outputs: dict[str, Any] = {"_fv_backward": (timestep, None)}
         metrics: dict[str, LogScalar] = {
             "train/timestep": float(timestep.item()),
             "train/weight": float(weight),
+            "train/er_inject_noise": float(injected["noise"]),
+            "train/er_inject_y": float(injected["y"]),
+            "train/er_inject_latent": float(injected["latent"]),
+            "train/er_use_clean_input": float(use_clean_input),
         }
+        if er is not None:
+            metrics["train/er_noise_buffer_size"] = float(er.noise_buffer.total_size())
+            metrics["train/er_y_buffer_size"] = float(er.y_buffer.total_size())
         return loss_map, outputs, metrics
+
+    # ------------------------------------------------------------------
+    # Error Recycling helpers
+    # ------------------------------------------------------------------
+
+    @torch.no_grad()
+    def _update_error_buffers(
+        self,
+        *,
+        noise_pred: torch.Tensor,
+        training_target: torch.Tensor,
+        timestep: torch.Tensor,
+        iteration: int,
+        use_clean_input: bool,
+    ) -> None:
+        er = self._er
+        assert er is not None  # caller-checked
+        # Gate buffer updates by clean_buffer_update_prob when clean input was used.
+        if use_clean_input and random.random() >= er.cfg.clean_buffer_update_prob:
+            return
+        sigma = sigma_at(self.student.noise_scheduler, timestep)
+        noise_error, y_error = compute_step_errors(
+            noise_pred=noise_pred,
+            training_target=training_target,
+            sigma=sigma,
+        )
+        # Keep the [B=1, C, T, H, W] storage so the y-channel slice math at injection
+        # time matches upstream verbatim (image_emb["y"][:, 4:, :y_error_num]).
+        if er.in_warmup(iteration):
+            er.update_distributed(noise_error=noise_error, y_error=y_error, timestep=timestep)
+        else:
+            er.update_local(noise_error=noise_error, y_error=y_error, timestep=timestep)
 
     # ------------------------------------------------------------------
     # Backward override: re-enter forward context for grad-ckpt recompute
