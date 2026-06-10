@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist/videos
+public/videos
+public/data.json
+public/thumbs
+*.log
