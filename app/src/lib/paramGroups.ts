@@ -126,13 +126,6 @@ const GROUPS: { name: string; keys: string[] }[] = [
   },
 ];
 
-export const DEFAULT_OPEN_GROUPS = new Set([
-  "EMA",
-  "DMD distillation",
-  "Quantization",
-  "Optimization",
-]);
-
 function norm(key: string): string {
   return key.replace(/^--/, "").replace(/-/g, "_");
 }

@@ -34,6 +34,7 @@ export interface Experiment {
   init_from: string;
   wandb_run_id: string | null;
   in_grid: boolean;
+  validation_set?: string | null;
   training_args: Bag;
   environment: Bag;
   code: Bag;
@@ -59,6 +60,7 @@ export interface ValidationCase {
   index: number;
   caption: string;
   has_real_caption: boolean;
+  validation_set?: string;
   resolution?: string | null;
 }
 

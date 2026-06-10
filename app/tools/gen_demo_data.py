@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 DEFAULT_CKPT_DIRS = [
@@ -77,6 +78,14 @@ def find_validation_file(name, ckpt_dir):
     return None
 
 
+def vset_id(args):
+    rel = args.get("validation_dataset_file")
+    if not rel:
+        return None
+    stem = Path(str(rel)).stem
+    return re.sub(r"\W+", "_", stem)
+
+
 def load_captions(args, ckpt_dir):
     rel = args.get("validation_dataset_file")
     if not rel:
@@ -118,6 +127,13 @@ def make_thumb(src, dst, ffmpeg):
         return r.returncode == 0 and dst.exists()
     except Exception:
         return False
+
+
+def make_thumbs_parallel(jobs, ffmpeg, workers=16):
+    if not jobs:
+        return
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(lambda j: make_thumb(j[0], j[1], ffmpeg), jobs))
 
 
 def wandb_run_id(ckpt_dir):
@@ -165,10 +181,11 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
 
     projects, pipelines, base_models, datasets = [], [], [], []
     experiments, checkpoints, output_videos = [], [], []
-    cases_by_index = {}
+    cases_by_key = {}
     proj_ids, pipe_ids, bm_ids, ds_ids = {}, {}, {}, {}
     exp_by_run_name = {}
     raw_lineage = []
+    thumb_jobs = []
     ckpt_root = ckpt_dirs[0].parent
 
     def ingest(ckpt_dir, in_grid):
@@ -190,8 +207,11 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
         bm_id = get_or_add(bm_ids, bm_repo, base_models,
                            lambda i: {"id": f"bm_{i}", "name": bm_repo.split("/")[-1], "hf_repo": bm_repo})
         ds_path = args.get("data_path", "unknown")
+        p = Path(ds_path)
+        ds_name = (p.parent.name if p.name in ("combined_parquet_dataset", "dataset", "data") and p.parent.name
+                   else p.name) or ds_path
         ds_id = get_or_add(ds_ids, ds_path, datasets,
-                           lambda i: {"id": f"ds_{i}", "name": Path(ds_path).name or ds_path, "path": ds_path})
+                           lambda i: {"id": f"ds_{i}", "name": ds_name, "path": ds_path})
 
         resolution = None
         if args.get("num_width") and args.get("num_height"):
@@ -199,6 +219,7 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
         guidance = to_num(args.get("validation_guidance_scale"), float)
 
         exp_id = f"exp_{e}"
+        vset = vset_id(args)
         experiments.append({
             "id": exp_id,
             "name": name,
@@ -209,6 +230,7 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
             "init_from": args.get("init_weights_from_safetensors", ""),
             "wandb_run_id": wandb_run_id(ckpt_dir),
             "in_grid": in_grid,
+            "validation_set": vset,
             "training_args": args,
             "environment": parse_environment(meta),
             "code": parse_code(meta),
@@ -226,6 +248,7 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
 
         captions = load_captions(args, ckpt_dir)
         videos = collect_videos(ckpt_dir)
+        vkey = vset or "none"
 
         for s in sorted({v["step"] for v in videos}):
             checkpoints.append({
@@ -236,27 +259,27 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
             })
 
         for vi in sorted({v["video_idx"] for v in videos}):
-            if vi not in cases_by_index:
+            if (vkey, vi) not in cases_by_key:
                 cap = captions.get(vi, "")
-                cases_by_index[vi] = {
-                    "id": f"case_{vi}",
+                cases_by_key[(vkey, vi)] = {
+                    "id": f"case_{vkey}_{vi}",
                     "index": vi,
-                    "caption": cap if cap else f"Val-{vi:02d}",
+                    "caption": cap if cap else f"{vkey} #{vi:02d}",
                     "has_real_caption": bool(cap),
+                    "validation_set": vkey,
                     "resolution": resolution,
                 }
 
         for v in videos:
             ov_id = f"ov_{e}_{v['step']}_{v['video_idx']}_{v['inference_steps']}"
             rel = os.path.relpath(str(ckpt_dir / v["name"]), str(common))
-            poster_path = ""
-            if make_thumb(ckpt_dir / v["name"], thumbs_dir / f"{ov_id}.jpg", ffmpeg):
-                poster_path = f"thumbs/{ov_id}.jpg"
+            jpg = thumbs_dir / f"{ov_id}.jpg"
+            thumb_jobs.append((ckpt_dir / v["name"], jpg))
             output_videos.append({
                 "id": ov_id,
                 "experiment_id": exp_id,
                 "checkpoint_id": f"ckpt_{e}_{v['step']}",
-                "validation_case_id": f"case_{v['video_idx']}",
+                "validation_case_id": f"case_{vkey}_{v['video_idx']}",
                 "sampling": prune({
                     "inference_steps": v["inference_steps"],
                     "guidance_scale": guidance,
@@ -264,7 +287,7 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
                     "fps": 16,
                 }),
                 "file_path": f"videos/{rel}",
-                "poster_path": poster_path,
+                "poster_path": f"thumbs/{ov_id}.jpg",
                 "exists": True,
             })
 
@@ -286,6 +309,12 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
         for l in raw_lineage if l["parent_name"] in exp_by_run_name
     ]
 
+    print(f"  generating thumbnails: {len(thumb_jobs)} jobs (cached ones skipped)…")
+    make_thumbs_parallel(thumb_jobs, ffmpeg)
+    for ov in output_videos:
+        if ov["poster_path"] and not (out_path.parent / ov["poster_path"]).exists():
+            ov["poster_path"] = ""
+
     doc = {
         "projects": projects,
         "pipelines": pipelines,
@@ -293,7 +322,7 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
         "dataset_snapshots": datasets,
         "experiments": experiments,
         "checkpoints": checkpoints,
-        "validation_cases": [cases_by_index[i] for i in sorted(cases_by_index)],
+        "validation_cases": [cases_by_key[k] for k in sorted(cases_by_key)],
         "output_videos": output_videos,
         "lineage": lineage,
     }
@@ -305,13 +334,25 @@ def build(ckpt_dirs, out_path, gen_thumbs=True):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt-dir", nargs="+", default=DEFAULT_CKPT_DIRS)
+    ap.add_argument("--ckpt-dir", nargs="+", default=None)
+    ap.add_argument("--ckpt-root", default=None,
+                    help="ingest every run dir under this root that has wandb metadata")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "public" / "data.json"))
     ap.add_argument("--no-symlink", action="store_true")
     ap.add_argument("--no-thumbs", action="store_true")
     a = ap.parse_args()
 
-    doc, common = build(a.ckpt_dir, a.out, gen_thumbs=not a.no_thumbs)
+    if a.ckpt_root:
+        root = Path(a.ckpt_root)
+        dirs = sorted(
+            str(d) for d in root.iterdir()
+            if d.is_dir() and not d.name.endswith("_weight_only")
+            and (d / "tracker/wandb/latest-run/files/wandb-metadata.json").exists()
+        )
+    else:
+        dirs = a.ckpt_dir or DEFAULT_CKPT_DIRS
+
+    doc, common = build(dirs, a.out, gen_thumbs=not a.no_thumbs)
 
     if not a.no_symlink:
         link = Path(a.out).parent / "videos"
@@ -327,14 +368,11 @@ def main():
           f"cases={len(doc['validation_cases'])} output_videos={len(doc['output_videos'])} "
           f"(posters={n_posters})")
     print(f"  videos symlink target: {common}")
-    for exp in doc["experiments"]:
-        env = exp.get("environment", {})
-        grid = "grid" if exp.get("in_grid") else "meta-only"
-        print(f"  - {exp['id']} [{grid}]: {exp['name']}")
-        print(f"      args={len(exp.get('training_args', {}))} gpu={env.get('gpu_count')}x{env.get('gpu')} "
-              f"commit={exp.get('code', {}).get('git_commit', '')[:8]}")
-    for l in doc["lineage"]:
-        print(f"  lineage: {l['from']} --{l['kind']}@ckpt-{l['step']}--> {l['to']}")
+    vsets = {}
+    for c in doc["validation_cases"]:
+        vsets[c["validation_set"]] = vsets.get(c["validation_set"], 0) + 1
+    print(f"  validation sets: {vsets}")
+    print(f"  lineage edges: {len(doc['lineage'])}")
 
 
 if __name__ == "__main__":

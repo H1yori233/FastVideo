@@ -15,8 +15,8 @@ export function VideoTile({
 
   if (!video || !video.exists) {
     return (
-      <span className="grid h-full w-full place-items-center bg-[repeating-linear-gradient(45deg,#15151b,#15151b_8px,#101015_8px,#101015_16px)]">
-        <span className="text-[10px] uppercase tracking-wider text-[#6a6a78]">not generated</span>
+      <span className="grid h-full w-full place-items-center bg-wash">
+        <span className="text-[11px] tracking-wide text-faint">not generated</span>
       </span>
     );
   }
@@ -50,7 +50,5 @@ export function VideoTile({
     );
   }
 
-  return (
-    <span className="grid h-full w-full place-items-center text-base text-[#4a4a56]">▶</span>
-  );
+  return <span className="grid h-full w-full place-items-center bg-wash text-faint">▶</span>;
 }

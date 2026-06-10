@@ -14,12 +14,15 @@ Stack: Vite + React 19 + TypeScript + Tailwind CSS v4 + shadcn-style components 
 (framer-motion). Data is local JSON; light user edits (graph layout) live in
 `localStorage`. No backend, no database, no auth.
 
-Views:
-- **Compare** — cases × runs poster grid (0 video downloads on load), global step selector;
-  click a case → side-by-side players + grouped training-args diff (only-differences / all).
-- **Graph** — run lineage canvas auto-derived from wandb args
-  (`init_weights_from_safetensors` / `resume_from_checkpoint`): pan/zoom, draggable nodes
-  (layout persists), click a run for its full RunCard.
+Views (graph-first):
+- **Graph (home)** — the management hub: every run with auto-derived lineage
+  (`init_weights_from_safetensors` / `resume_from_checkpoint`). Search runs, pan/zoom,
+  drag nodes (layout persists), click a node for its full configuration + lineage links,
+  and **select runs (○/◉) to build a comparison set** — Compare N runs →.
+- **Results** — figure list for the selected runs: each validation case as a serif-captioned
+  figure with one video plate per run (posters only, 0 video downloads).
+- **Case** — side-by-side players + Table 1 (differing hyperparameters, honest `default`
+  for unset args) + Appendix (full grouped configuration).
 
 ## Run
 

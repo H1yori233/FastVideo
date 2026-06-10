@@ -173,6 +173,36 @@ npm run dev          # then VS Code Ports -> forward 5173
   while the user has one on the login node. Verify on a *different port AND* avoid relying
   on the shared optimize cache, or just don't — drive the user's running instance instead.
 
+## `+` in URL query params decodes to SPACE — never use it in shareable tokens
+
+- **Symptom:** deep link `#/results?runs=exp_37+exp_38` renders empty (token lookup fails);
+  in-app navigation works (URLSearchParams encodes `+` as `%2B`).
+- **Cause:** per URL spec, a literal `+` in a query string decodes to a space.
+- **Fix:** use `~` (URL-safe, no decoding ambiguity) as the merged-run token separator.
+  Also note: multi-line `token\n.split("+")` escapes a single-line `sed` — grep the built
+  bundle (`grep -o 'split("[+~]")' dist/assets/*.js`) to confirm what actually shipped.
+
+## Real-scale ingestion (51 runs / ~7000 videos) — what broke and the fixes
+
+- **Validation sets must be namespaced.** Different runs use different validation files
+  (`validation.json` vs `validation_16.json`) with different prompts at the same video
+  index. A global `case_{idx}` key silently mixes prompts across sets. Fix: case id =
+  `case_{vset}_{idx}` (vset = sanitized validation-file stem); experiments carry
+  `validation_set`; compare views filter rows to the selected runs' sets.
+- **Thumbnails must be parallel.** ~7000 ffmpeg first-frame extractions serially ≈ 15 min;
+  `ThreadPoolExecutor(max_workers=16)` → 51 s wall (cache makes re-runs instant).
+- **Default compare set must be empty at scale.** With every ingested run flagged
+  `in_grid`, "default = in_grid" would mean a 51-column grid. Default selection = [] and
+  the graph is the picker.
+- **Graph columns must wrap.** ~30 root runs (no lineage parents) stack into one
+  unreadably tall depth-column; fit-view then zooms to confetti. Wrap each depth column
+  into sub-columns of ≤8 rows (mosaic) — landscape, readable at fit zoom.
+- **Steps differ across arbitrary selections** (resume runs start at 2600+). Pure
+  intersection of steps can be empty → use intersection, fall back to union (cells render
+  "not generated" where a run lacks that step).
+- Discovery flag: `python3 tools/gen_demo_data.py --ckpt-root <checkpoints-dir>` ingests
+  every run dir with wandb metadata (skips `*_weight_only`).
+
 ## Performance: don't eagerly mount every cell's `<video>`
 
 - **Symptom:** the flat matrix loads extremely slowly.
