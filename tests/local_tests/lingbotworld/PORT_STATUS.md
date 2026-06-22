@@ -10,10 +10,11 @@
 - local_tests_readme: tests/local_tests/lingbotworld/README.md
 
 ## Current Phase
-- phase: verification
-- status: in_progress
+- phase: complete (Fast); Act deferred to follow-up
+- status: complete
 - owner: orchestrator
 - last_updated: 2026-06-22
+- gates: component parity PASS, pipeline parity PASS, pipeline smoke PASS, example runs, SSIM deferred
 
 ## Component Matrix
 | Component | Type | Reuse/Port | Official Definition | FastVideo Target | Conversion | Parity |
@@ -35,7 +36,7 @@
 |-------|---------|-------------|-------|
 | Component (DiT chunk0 forward + chunk1 KV-cache causality) | DISABLE_SP=1 pytest tests/local_tests/lingbotworld/test_lingbotworld_fast_parity.py | chunk0 cosine=0.999104 relMAE=0.042 drift<1%; chunk1 cosine=0.998999 relMAE=0.045 (standalone-confirmed; runner-based pytest) | official vs FastVideo, same weights, MATH SDPA both sides |
 | Pipeline (stage vs official, 1 deterministic DMD step) | DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_fast_pipeline_parity.py | cosine=0.999936 relMAE=0.011 PASS | validates the 36-ch image concat + flow->x0 vs official; single step (no re-noise) |
-| Pipeline smoke (load + 1-chunk generate) | DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_fast_pipeline_smoke.py | pending | VideoGenerator end-to-end, non-degenerate-output check |
+| Pipeline smoke (load + 1-chunk generate) | DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_fast_pipeline_smoke.py | PASS: frames (9,480,832,3) uint8 std=79.6 | VideoGenerator end-to-end, non-degenerate-output check |
 
 Note on multi-step pipeline parity: the full 4-step DMD AR loop is NOT used as a
 parity target. With matched inputs/scheduler/re-noise, the ~4% per-forward
@@ -50,6 +51,8 @@ pipeline smoke (coherent generation) together cover the pipeline.
 |----|-------|----------|-------|--------|------------|
 | I001 | parity | medium | The official `WanModelFast` is numerically unstable on this GB200/Blackwell box: its bf16 attention (flash_attn / the flash & mem-efficient SDPA backends) intermittently returns ~2.5x-off garbage (output abs-mean 0.091 vs the correct 0.226), specifically once a FastVideo model has been built/run in the same process. The FastVideo port is stable (abs-mean 0.225) and matches the correct official output (cosine 0.999). | resolved | (1) Force the MATH SDPA backend for both models in the parity tests; (2) run the official reference in a clean subprocess (``_fast_parity_runner.py`` / ``_fast_pipeline_runner.py``), building/running the official before any FastVideo model. This is an official-code-on-Blackwell issue, not a port bug. |
 | I002 | parity | low | Standalone scratch parity needed `set_forward_context` around the FastVideo forward (LocalAttention reads it). | resolved | tests wrap the FastVideo forward in set_forward_context; the production denoising stage already does. |
+| I003 | pipeline | medium | (caught by the smoke) The denoising stage called `scheduler.set_timesteps(shift=...)`, but the loaded scheduler is diffusers `UniPCMultistepScheduler` whose `set_timesteps` has no `shift` kwarg (flow_shift is config-level via `use_flow_sigmas`). | resolved | `_select_timesteps` now try/excepts: shift kwarg for FlowUniPC, else set `config.flow_shift` + plain set_timesteps. |
+| I004 | pipeline | high | (caught by the smoke) `_required_config_modules` omitted `text_encoder`/`tokenizer`, so the loader skipped them, the TextEncodingStage never ran, and prompt_embeds was an empty placeholder. | resolved | `_required_config_modules = ["text_encoder","tokenizer","vae","transformer","scheduler"]` (matches the Wan DMD pipelines). |
 
 ## Decisions
 | Date | Decision | Rationale |

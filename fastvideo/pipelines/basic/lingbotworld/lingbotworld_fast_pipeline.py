@@ -18,7 +18,7 @@ logger = init_logger(__name__)
 
 
 class LingBotWorldCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
-    _required_config_modules = ["vae", "transformer", "scheduler"]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         self.add_stage(stage_name="input_validation_stage", stage=InputValidationStage())
