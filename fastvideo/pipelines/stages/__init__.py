@@ -31,6 +31,7 @@ from fastvideo.pipelines.basic.ltx2.stages import (  # noqa: F401
     LTX2TextEncodingStage, LTX2UpsampleStage, STAGE_2_DISTILLED_SIGMA_VALUES,
 )
 from fastvideo.pipelines.stages.matrixgame2_denoising import MatrixGame2CausalDenoisingStage
+from fastvideo.pipelines.stages.lingbotworld_fast_denoising import LingBotWorldFastCausalDenoisingStage
 from fastvideo.pipelines.stages.matrixgame3_denoising import MatrixGame3DenoisingStage
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
@@ -63,6 +64,7 @@ __all__ = [
     "CausalDMDDenosingStage",
     "CausalDenoisingStage",
     "MatrixGame2CausalDenoisingStage",
+    "LingBotWorldFastCausalDenoisingStage",
     "MatrixGame3DenoisingStage",
     "HYWorldDenoisingStage",
     "GameCraftDenoisingStage",

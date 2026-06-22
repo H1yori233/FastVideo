@@ -94,3 +94,24 @@ class LingBotWorldVideoConfig(DiTConfig):
     arch_config: DiTArchConfig = field(default_factory=LingBotWorldArchConfig)
 
     prefix: str = "Wan"
+
+
+@dataclass
+class CausalLingBotWorldArchConfig(LingBotWorldArchConfig):
+    # LingBot-World-Fast is the block-causal, KV-cached, DMD-distilled variant.
+    # It shares the Cam parameter structure (param_names_mapping is inherited),
+    # but conditions the first frame via channel concatenation (16 noise + 4
+    # mask + 16 image latent = 36 input channels) instead of a separate encoder.
+    in_channels: int = 36
+    out_channels: int = 16
+    local_attn_size: int = -1
+    sink_size: int = 9
+    num_frames_per_block: int = 3
+    sliding_window_num_frames: int = 18
+
+
+@dataclass
+class CausalLingBotWorldVideoConfig(LingBotWorldVideoConfig):
+    arch_config: DiTArchConfig = field(default_factory=CausalLingBotWorldArchConfig)
+
+    prefix: str = "Wan"
