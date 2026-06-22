@@ -342,11 +342,10 @@ class CausalMatrixGame2SelfAttention(nn.Module):
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
             v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
 
-            x = torch.nn.functional.scaled_dot_product_attention(
-                roped_query.transpose(1, 2),
-                k_for_attn.transpose(1, 2),
-                v_for_attn.transpose(1, 2),
-            ).transpose(1, 2)
+            from fastvideo.models.dits.matrixgame2.attn_injection import (
+                injected_sdpa)
+            x = injected_sdpa(self, roped_query, k_for_attn, v_for_attn,
+                              sink_tokens)
 
             if isinstance(kv_cache["global_end_index"], torch.Tensor):
                 kv_cache["global_end_index"].fill_(current_end)
