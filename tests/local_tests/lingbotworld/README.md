@@ -1,7 +1,7 @@
 # LingBot-World local tests
 
 Reviewer-facing setup + verification log for the LingBot-World family ports
-(Cam — already in `main`; Fast — this PR; Act — planned, see `PORT_STATUS.md`).
+(Cam — already in `main`; Fast + Act — this PR, see `PORT_STATUS.md`).
 
 ## Official reference
 
@@ -17,7 +17,7 @@ Reviewer-facing setup + verification log for the LingBot-World family ports
 |---------|---------|--------|-------|
 | Cam | `FastVideo/LingBot-World-Base-Cam-Diffusers` | diffusers (official-named tensors) | none (public) |
 | Fast | `robbyant/lingbot-world-fast-diffusers` | diffusers (official-named tensors) | none (public) |
-| Act | `robbyant/lingbot-world-base-act-preview` | official MoE (`high_noise_model/`, `low_noise_model/`) — needs converter | none (public) |
+| Act | `robbyant/lingbot-world-base-act-preview` | official MoE (`high_noise_model/`, `low_noise_model/`) — converted to diffusers by `scripts/checkpoint_conversion/convert_lingbotworld_act_to_diffusers.py` | none (public) |
 
 The Fast diffusers repo stores **official-named** transformer tensors (1421
 keys, identical key set to Cam), so the same weights load into both the official
@@ -49,6 +49,22 @@ DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_fast_pipeline_
 
 # Runnable example
 python examples/inference/basic/basic_lingbotworld_fast.py
+
+# --- Act (full-sequence A14B MoE, act2cam control_dim=7) ---
+# Convert official MoE preview -> diffusers (symlinks; --out is gitignored)
+python scripts/checkpoint_conversion/convert_lingbotworld_act_to_diffusers.py \
+    --out official_weights/lingbotworld_act_diffusers
+
+# Act component parity (official WanModel(control_type='act') vs FastVideo Act)
+DISABLE_SP=1 python tests/local_tests/lingbotworld/_act_parity_runner.py \
+    official_weights/lingbotworld_act_diffusers
+
+# Act pipeline preflight + real 28B-MoE generate smoke (act2cam-driven)
+DISABLE_SP=1 LINGBOT_ACT_DIR=official_weights/lingbotworld_act_diffusers \
+    pytest tests/local_tests/pipelines/test_lingbotworld_act_pipeline_smoke.py -v -s
+
+# Runnable example (driven by an action string)
+python examples/inference/basic/basic_lingbotworld_base_act.py
 ```
 
 Required-before-handoff: every test above is a non-skip PASS. See `PORT_STATUS.md`

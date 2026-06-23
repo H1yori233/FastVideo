@@ -1,7 +1,7 @@
 # LingBot-World port state
 
 ## Summary
-- model_family: lingbotworld_fast (this PR); lingbotworld/Cam already in main; Act planned
+- model_family: lingbotworld_fast + lingbotworld_act (this PR); lingbotworld/Cam already in main
 - workload_types: I2V
 - official_ref: https://github.com/Robbyant/lingbot-world (reference/lingbot-world)
 - hf_weights_path: robbyant/lingbot-world-fast-diffusers (diffusers layout, official-named tensors)
@@ -10,16 +10,18 @@
 - local_tests_readme: tests/local_tests/lingbotworld/README.md
 
 ## Current Phase
-- phase: complete (Fast); Act deferred to follow-up
+- phase: complete (Fast + Act)
 - status: complete
 - owner: orchestrator
 - last_updated: 2026-06-22
-- gates: component parity PASS, pipeline parity PASS, pipeline smoke PASS, example runs, SSIM deferred
+- gates (Fast): component parity PASS, pipeline parity PASS, pipeline smoke PASS, example runs, SSIM deferred
+- gates (Act): component parity PASS, pipeline preflight PASS, pipeline generate smoke PASS, example runs, SSIM deferred
 
 ## Component Matrix
 | Component | Type | Reuse/Port | Official Definition | FastVideo Target | Conversion | Parity |
 |-----------|------|-----------|---------------------|------------------|------------|--------|
 | Transformer (Fast, block-causal DMD) | DiT | Port | wan/modules/model_fast.py:WanModelFast | models/dits/lingbotworld/causal_model.py:CausalLingBotWorldTransformer3DModel | none (diffusers repo stores official-named tensors) | non_skip_pass |
+| Transformer (Act, full-seq A14B MoE, act2cam control_dim=7) | DiT | Reuse (Cam arch) | wan/modules/model.py:WanModel(control_type='act') | models/dits/lingbotworld/model.py:LingBotWorldTransformer3DModel (Act config) | symlink converter (official MoE -> diffusers); inherited Cam mapping | non_skip_pass |
 | VAE | AutoencoderKLWan | Reuse | Wan2.1 VAE | shared WanVAE | none | reused (Wan2.1) |
 | Text encoder | UMT5EncoderModel | Reuse | umt5-xxl | shared T5 | none | reused |
 | Scheduler | UniPC | Reuse | FlowUniPCMultistepScheduler | shared | none | reused |
@@ -37,6 +39,9 @@
 | Component (DiT chunk0 forward + chunk1 KV-cache causality) | DISABLE_SP=1 pytest tests/local_tests/lingbotworld/test_lingbotworld_fast_parity.py | chunk0 cosine=0.999104 relMAE=0.042 drift<1%; chunk1 cosine=0.998999 relMAE=0.045 (standalone-confirmed; runner-based pytest) | official vs FastVideo, same weights, MATH SDPA both sides |
 | Pipeline (stage vs official, 1 deterministic DMD step) | DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_fast_pipeline_parity.py | cosine=0.999936 relMAE=0.011 PASS | validates the 36-ch image concat + flow->x0 vs official; single step (no re-noise) |
 | Pipeline smoke (load + 1-chunk generate) | DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_fast_pipeline_smoke.py | PASS: frames (9,480,832,3) uint8 std=79.6 | VideoGenerator end-to-end, non-degenerate-output check |
+| Act component (DiT full-seq forward, act2cam 7x64 control) | DISABLE_SP=1 python tests/local_tests/lingbotworld/_act_parity_runner.py official_weights/lingbotworld_act_diffusers | cosine=0.999514 relMAE=0.031 drift<1% PASS | official base WanModel(control_type='act') vs FastVideo Act, same high-noise expert weights, MATH SDPA both sides, official-first |
+| Act pipeline preflight (registry/preset/config wiring) | DISABLE_SP=1 pytest tests/local_tests/pipelines/test_lingbotworld_act_pipeline_smoke.py::test_lingbotworld_act_preflight | PASS | resolves lingbotworld_act; Cam/Fast detectors do not claim it; control_dim=7, boundary 0.947 |
+| Act pipeline generate smoke (real 28B MoE + act control) | DISABLE_SP=1 LINGBOT_ACT_DIR=official_weights/lingbotworld_act_diffusers pytest tests/local_tests/pipelines/test_lingbotworld_act_pipeline_smoke.py::test_lingbotworld_act_pipeline_smoke | PASS: frames (21,480,832,3) uint8 std=53.9 | dual-expert MoE (boundary 0.947) driven by prepare_action_embedding; act2cam control flows through the reused Cam pipeline |
 
 Note on multi-step pipeline parity: the full 4-step DMD AR loop is NOT used as a
 parity target. With matched inputs/scheduler/re-noise, the ~4% per-forward
@@ -78,5 +83,19 @@ pipeline smoke (coherent generation) together cover the pipeline.
 ## Handoff Notes
 - Component parity is a non-skip PASS (both chunks, cosine 0.999). Pipeline parity
   + smoke are runner/VideoGenerator-based.
-- Act variant deferred to a follow-up phase (act2cam reuse of the Cam camera path
-  + converter for the preview MoE weights).
+- Act variant is COMPLETE in this PR: act2cam reuses the Cam full-sequence A14B-MoE
+  architecture with control_dim=7 (rays_d + WASD). The official MoE preview weights
+  are mapped to a diffusers layout by a symlink converter
+  (`scripts/checkpoint_conversion/convert_lingbotworld_act_to_diffusers.py`), and the
+  Cam `param_names_mapping` is inherited verbatim. Component parity cosine 0.999514;
+  the real 28B-MoE generate smoke passes with the act2cam control routed through the
+  reused Cam pipeline.
+- Act gotcha (fixed): `LingBotWorldActArchConfig` must set `in_channels=36`,
+  `out_channels=16` explicitly. The Cam base config defaults `in_channels=16` (masked
+  in production by the diffusers `config.json` override to 36); the param-name parity
+  check matches keys, not shapes, so the mismatch only surfaces at `load_state_dict`.
+- Act note (cosmetic): loading the converted dir logs "Multiple models matched ...
+  ['16','18'] using '16'" from `_MODEL_NAME_DETECTORS`; the actual DiT class is still
+  resolved correctly from `config.json._class_name` (LingBotWorldTransformer3DModel),
+  and the generate smoke confirms correct output. Pre-existing registry verbosity, not
+  an Act bug.

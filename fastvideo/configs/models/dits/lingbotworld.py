@@ -73,6 +73,10 @@ class LingBotWorldArchConfig(DiTArchConfig):
     pos_embed_seq_len: int | None = None
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
+    # Camera-control channels for patch_embedding_wancamctrl (in_chans = control_dim * 64):
+    # 6 = Plucker rays_o+rays_d (Cam); 7 = rays_d + WASD action (Act / act2cam).
+    control_dim: int = 6
+
     # Wan MoE
     boundary_ratio: float | None = None
 
@@ -113,5 +117,24 @@ class CausalLingBotWorldArchConfig(LingBotWorldArchConfig):
 @dataclass
 class CausalLingBotWorldVideoConfig(LingBotWorldVideoConfig):
     arch_config: DiTArchConfig = field(default_factory=CausalLingBotWorldArchConfig)
+
+    prefix: str = "Wan"
+
+
+@dataclass
+class LingBotWorldActArchConfig(LingBotWorldArchConfig):
+    # LingBot-World-Act = the Cam (full-sequence A14B-MoE) architecture with
+    # act2cam control: discrete WASD/IJKL -> camera poses -> Plucker rays_d (3)
+    # concatenated with the 4 WASD channels => control_dim 7.
+    # I2V channel concat (16 noise + 4 mask + 16 image latent), like the Cam
+    # checkpoint (its config.json sets in_channels=36; we make it explicit here).
+    in_channels: int = 36
+    out_channels: int = 16
+    control_dim: int = 7
+
+
+@dataclass
+class LingBotWorldActVideoConfig(LingBotWorldVideoConfig):
+    arch_config: DiTArchConfig = field(default_factory=LingBotWorldActArchConfig)
 
     prefix: str = "Wan"

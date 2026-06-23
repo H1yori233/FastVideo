@@ -65,4 +65,14 @@ LINGBOTWORLD_FAST_I2V = InferencePreset(
     },
 )
 
-ALL_PRESETS = (LINGBOTWORLD_I2V, LINGBOTWORLD_FAST_I2V)
+LINGBOTWORLD_ACT_I2V = InferencePreset(
+    name="lingbotworld_act_i2v",
+    version=1,
+    model_family="lingbotworld_act",
+    description="LingBot-World-Act I2V (act2cam) with dual guidance",
+    workload_type="i2v",
+    stage_schemas=(_DENOISE_STAGE, ),
+    defaults=dict(LINGBOTWORLD_I2V.defaults),
+)
+
+ALL_PRESETS = (LINGBOTWORLD_I2V, LINGBOTWORLD_FAST_I2V, LINGBOTWORLD_ACT_I2V)

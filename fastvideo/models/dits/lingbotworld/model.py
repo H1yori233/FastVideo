@@ -256,7 +256,7 @@ class LingBotWorldTransformer3DModel(BaseDiT):
                                           embed_dim=inner_dim,
                                           patch_size=config.patch_size,
                                           flatten=False)
-        self.patch_embedding_wancamctrl = WanCamControlPatchEmbedding(in_chans=6 * 64,
+        self.patch_embedding_wancamctrl = WanCamControlPatchEmbedding(in_chans=config.control_dim * 64,
                                                                       embed_dim=inner_dim,
                                                                       patch_size=config.patch_size)
         self.c2ws_mlp = MLP(inner_dim, inner_dim, inner_dim, bias=True, act_type="silu")
