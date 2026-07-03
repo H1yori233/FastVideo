@@ -389,6 +389,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.patch_size = config.patch_size
         self.text_len = config.text_len
         self.local_attn_size = config.local_attn_size
+        self.sink_size = config.sink_size
         self.rope_cache_policy = config.arch_config.rope_cache_policy
 
         # 1. Patch & position embedding
@@ -447,7 +448,8 @@ class CausalWanTransformer3DModel(BaseDiT):
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(
         device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
+        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1,
+        sink_size=0
     ) -> BlockMask:
         """
         we will divide the token sequence into the following format
@@ -478,7 +480,14 @@ class CausalWanTransformer3DModel(BaseDiT):
             if local_attn_size == -1:
                 return (kv_idx < ends[q_idx]) | (q_idx == kv_idx)
             else:
-                return ((kv_idx < ends[q_idx]) & (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))) | (q_idx == kv_idx)
+                # Sliding window of size (local_attn_size - sink_size) frames plus
+                # the first sink_size frames (attention sink), mirroring the rolling
+                # KV cache at inference where sink + window == local_attn_size.
+                sink_end = sink_size * frame_seqlen
+                window_start = ends[q_idx] - (local_attn_size - sink_size) * frame_seqlen
+                in_window = (kv_idx < ends[q_idx]) & (kv_idx >= window_start)
+                in_sink = (kv_idx < ends[q_idx]) & (kv_idx < sink_end)
+                return in_window | in_sink | (q_idx == kv_idx)
             # return ((kv_idx < total_length) & (q_idx < total_length))  | (q_idx == kv_idx) # bidirectional mask
 
         block_mask = create_block_mask(attention_mask, B=None, H=None, Q_LEN=total_length + padded_length,
@@ -740,7 +749,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                     num_frames=num_frames,
                     frame_seqlen=post_patch_height * post_patch_width,
                     num_frame_per_block=self.num_frame_per_block,
-                    local_attn_size=self.local_attn_size
+                    local_attn_size=self.local_attn_size,
+                    sink_size=self.sink_size
                 )
             block_mask = self.block_mask
 
