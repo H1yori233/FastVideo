@@ -78,6 +78,114 @@ class CausalWanSelfAttention(nn.Module):
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                           AttentionBackendEnum.TORCH_SDPA))
 
+    @staticmethod
+    def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted((max(0, s), max(0, e)) for s, e in ranges):
+            if end <= start:
+                continue
+            if not merged or start > merged[-1][1]:
+                merged.append((start, end))
+            else:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        return merged
+
+    @staticmethod
+    def _slice_ranges(x: torch.Tensor, ranges: list[tuple[int, int]]) -> torch.Tensor:
+        if len(ranges) == 1:
+            start, end = ranges[0]
+            return x[:, start:end].contiguous()
+        return torch.cat([x[:, start:end] for start, end in ranges], dim=1).contiguous()
+
+    def _context_ranges_for_block(
+        self,
+        block_end: int,
+        context_limit: int,
+        frame_seqlen: int,
+    ) -> list[tuple[int, int]]:
+        block_end = min(max(0, block_end), context_limit)
+        if block_end <= 0:
+            return []
+
+        ranges: list[tuple[int, int]] = []
+        sink_end = min(max(0, self.sink_size) * frame_seqlen, block_end)
+        if sink_end > 0:
+            ranges.append((0, sink_end))
+
+        window_tokens = max(0, self.local_attn_size - self.sink_size) * frame_seqlen
+        if window_tokens > 0:
+            ranges.append((max(0, block_end - window_tokens), block_end))
+        return self._merge_ranges(ranges)
+
+    def _blockwise_local_attention(
+        self,
+        roped_query: torch.Tensor,
+        roped_key: torch.Tensor,
+        value: torch.Tensor,
+        frame_seqlen: int,
+        num_frame_per_block: int,
+        teacher_forcing_clean_len: int | None = None,
+    ) -> torch.Tensor:
+        block_tokens = frame_seqlen * num_frame_per_block
+        if block_tokens <= 0:
+            raise ValueError(f"block_tokens must be positive, got {block_tokens}")
+
+        def attend_chunk(
+            q_start: int,
+            q_end: int,
+            kv_ranges: list[tuple[int, int]],
+        ) -> torch.Tensor:
+            kv_ranges = self._merge_ranges(kv_ranges)
+            if not kv_ranges:
+                raise ValueError("local attention chunk has no KV context")
+            return self.attn(
+                roped_query[:, q_start:q_end].contiguous(),
+                self._slice_ranges(roped_key, kv_ranges),
+                self._slice_ranges(value, kv_ranges),
+            )
+
+        if teacher_forcing_clean_len is None:
+            chunks = []
+            seq_len = roped_query.shape[1]
+            for block_start in range(0, seq_len, block_tokens):
+                block_end = min(block_start + block_tokens, seq_len)
+                chunks.append(attend_chunk(
+                    block_start,
+                    block_end,
+                    self._context_ranges_for_block(block_end, seq_len, frame_seqlen),
+                ))
+            return torch.cat(chunks, dim=1)
+
+        clean_len = int(teacher_forcing_clean_len)
+        seq_len = roped_query.shape[1]
+        if clean_len <= 0 or clean_len >= seq_len:
+            raise ValueError(
+                f"invalid teacher_forcing_clean_len={clean_len} for seq_len={seq_len}")
+
+        clean_chunks = []
+        noisy_chunks = []
+        for block_start in range(0, clean_len, block_tokens):
+            block_end = min(block_start + block_tokens, clean_len)
+            clean_chunks.append(attend_chunk(
+                block_start,
+                block_end,
+                self._context_ranges_for_block(block_end, clean_len, frame_seqlen),
+            ))
+
+        for block_start in range(0, clean_len, block_tokens):
+            block_end = min(block_start + block_tokens, clean_len)
+            clean_context_end = block_start
+            kv_ranges = self._context_ranges_for_block(
+                clean_context_end, clean_len, frame_seqlen)
+            kv_ranges.append((clean_len + block_start, clean_len + block_end))
+            noisy_chunks.append(attend_chunk(
+                clean_len + block_start,
+                clean_len + block_end,
+                kv_ranges,
+            ))
+
+        return torch.cat(clean_chunks + noisy_chunks, dim=1)
+
     def forward(self, 
                 q: torch.Tensor,
                 k: torch.Tensor,
@@ -87,7 +195,9 @@ class CausalWanSelfAttention(nn.Module):
                 kv_cache: dict | None = None,
                 current_start: int = 0,
                 cache_start: int | None = None,
-                frame_seqlen: int = 1560):
+                frame_seqlen: int = 1560,
+                num_frame_per_block: int = 1,
+                teacher_forcing_clean_len: int | None = None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -107,7 +217,16 @@ class CausalWanSelfAttention(nn.Module):
             roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
             roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
-        if kv_cache is None:
+        if kv_cache is None and self.local_attn_size != -1:
+            x = self._blockwise_local_attention(
+                roped_query,
+                roped_key,
+                v,
+                frame_seqlen=frame_seqlen,
+                num_frame_per_block=num_frame_per_block,
+                teacher_forcing_clean_len=teacher_forcing_clean_len,
+            )
+        elif kv_cache is None:
             # Padding for flex attention
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
             padded_roped_query = torch.cat(
@@ -300,6 +419,8 @@ class CausalWanTransformerBlock(nn.Module):
         current_start: int = 0,
         cache_start: int | None = None,
         frame_seqlen: int | None = None,
+        num_frame_per_block: int = 1,
+        teacher_forcing_clean_len: int | None = None,
     ) -> torch.Tensor:
         # hidden_states.shape: [batch_size, seq_length, inner_dim]
         # temb.shape: [batch_size, temb_seq_len, 6, inner_dim]
@@ -348,6 +469,8 @@ class CausalWanTransformerBlock(nn.Module):
             current_start,
             cache_start,
             frame_seqlen=frame_seqlen,
+            num_frame_per_block=num_frame_per_block,
+            teacher_forcing_clean_len=teacher_forcing_clean_len,
         )
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -446,6 +569,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         # Causal-specific
         self.block_mask = None
         self.teacher_forcing_block_mask = None
+        self._logged_local_training_attention = False
         self.num_frame_per_block = config.arch_config.num_frames_per_block
         assert self.num_frame_per_block <= 3
         self.independent_first_frame = False
@@ -986,6 +1110,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         if teacher_forcing:
             # Tile RoPE/modulation so clean frame i and noisy frame i share a position.
             clean_tokens = self.patch_embedding(clean_x).flatten(2).transpose(1, 2)
+            teacher_forcing_clean_len = clean_tokens.shape[1]
             hidden_states = torch.cat([clean_tokens, hidden_states], dim=1)
             if aug_t is None:
                 aug_t = torch.zeros_like(timestep)
@@ -998,17 +1123,32 @@ class CausalWanTransformer3DModel(BaseDiT):
                          torch.cat([freqs_sin, freqs_sin], dim=0))
 
         # 4. Transformer blocks
+        local_training_attention = self.local_attn_size != -1
+        if local_training_attention and not self._logged_local_training_attention:
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                print(
+                    "Using FlashAttention block-local training path "
+                    f"(local_attn_size={self.local_attn_size}, sink_size={self.sink_size}, "
+                    f"num_frame_per_block={self.num_frame_per_block})")
+            self._logged_local_training_attention = True
+
+        causal_kwargs = {
+            "block_mask": block_mask,
+            "frame_seqlen": post_patch_height * post_patch_width,
+            "num_frame_per_block": self.num_frame_per_block,
+            "teacher_forcing_clean_len": teacher_forcing_clean_len if teacher_forcing else None,
+        }
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, encoder_hidden_states,
                     timestep_proj, freqs_cis,
-                    block_mask=block_mask)
+                    **causal_kwargs)
         else:
             for block in self.blocks:
                 hidden_states = block(hidden_states, encoder_hidden_states,
                                         timestep_proj, freqs_cis,
-                                        block_mask=block_mask)
+                                        **causal_kwargs)
 
         if teacher_forcing:
             hidden_states = hidden_states[:, hidden_states.shape[1] // 2:]
