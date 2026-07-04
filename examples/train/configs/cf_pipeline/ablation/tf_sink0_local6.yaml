@@ -56,7 +56,7 @@ callbacks:
     every_steps: 200
     sampling_steps: [40]
     guidance_scale: 6.0
-    num_frames: 77
+    num_frames: 81
     output_dir: __VALIDATION_DIR__
     offload_training_state: true
     unload_pipeline_after_validation: true
