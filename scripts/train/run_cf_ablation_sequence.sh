@@ -9,6 +9,7 @@ PROJECT_NAME="${PROJECT_NAME:-causal_forcing_cf_ablation}"
 WANDB_MODE="${WANDB_MODE:-online}"
 NUM_GPUS="${NUM_GPUS:-4}"
 MASTER_PORT_BASE="${MASTER_PORT_BASE:-29700}"
+RUN_NAME_SUFFIX="${RUN_NAME_SUFFIX:-relrope}"
 
 if [[ "$WANDB_MODE" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
   echo "WANDB_MODE=online requires WANDB_API_KEY in the runtime environment." >&2
@@ -24,6 +25,7 @@ export DIFFUSERS_CACHE="${DIFFUSERS_CACHE:-/mnt/lustre/vlm-k1kong/hf-cache/diffu
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/mnt/lustre/vlm-k1kong/xdg-cache}"
 export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-/mnt/lustre/vlm-k1kong/cuda-cache}"
 export FASTVIDEO_ATTENTION_BACKEND="${FASTVIDEO_ATTENTION_BACKEND:-FLASH_ATTN}"
+export ROPE_CACHE_POLICY="${ROPE_CACHE_POLICY:-relativistic}"
 export FASTVIDEO_DIST_TIMEOUT_MINUTES="${FASTVIDEO_DIST_TIMEOUT_MINUTES:-120}"
 export TORCH_NCCL_BLOCKING_WAIT="${TORCH_NCCL_BLOCKING_WAIT:-1}"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/lustre/vlm-k1kong/triton-cache/fastvideo-cf}"
@@ -40,7 +42,7 @@ mkdir -p "$sequence_dir"
 sequence_log="$sequence_dir/sequence.log"
 runs_tsv="$sequence_dir/runs.tsv"
 printf '%s\n' "$sequence_dir" > "$EXP_ROOT/FULL_SEQUENCE_LATEST"
-printf 'condition\trun_root\n' > "$runs_tsv"
+printf 'condition\trun_label\trun_root\n' > "$runs_tsv"
 
 log() {
   printf '[%s] %s\n' "$(date -Is)" "$*" | tee -a "$sequence_log"
@@ -49,13 +51,16 @@ log() {
 cd "$REPO"
 log "Starting CF ablation sequence in $sequence_dir"
 log "Conditions: ${RUN_CONDITIONS:-sink0_local6 sink0_local9 sink1_local6 sink1_local9}"
+log "Run name suffix: $RUN_NAME_SUFFIX"
+log "RoPE cache policy: $ROPE_CACHE_POLICY"
 
 idx=0
 for condition in ${RUN_CONDITIONS:-sink0_local6 sink0_local9 sink1_local6 sink1_local9}; do
   run_ts=$(date +%Y%m%d_%H%M%S)
-  run_root="$EXP_ROOT/${run_ts}_${condition}_tf3k_cd2k"
-  printf '%s\t%s\n' "$condition" "$run_root" >> "$runs_tsv"
-  log "Condition $condition: run_root=$run_root"
+  run_label="${condition}_${RUN_NAME_SUFFIX}"
+  run_root="$EXP_ROOT/${run_ts}_${run_label}_tf3k_cd2k"
+  printf '%s\t%s\t%s\n' "$condition" "$run_label" "$run_root" >> "$runs_tsv"
+  log "Condition $condition: run_label=$run_label run_root=$run_root"
 
   tf_port=$((MASTER_PORT_BASE + idx * 2))
   cd_port=$((MASTER_PORT_BASE + idx * 2 + 1))
@@ -64,11 +69,11 @@ for condition in ${RUN_CONDITIONS:-sink0_local6 sink0_local9 sink1_local6 sink1_
   CONFIG="$CONFIG_DIR/tf_${condition}.yaml" \
   RUN_ROOT="$run_root" \
   STAGE=tf \
-  CONDITION="$condition" \
+  CONDITION="$run_label" \
   NUM_GPUS="$NUM_GPUS" \
   MASTER_PORT="$tf_port" \
   WANDB_MODE="$WANDB_MODE" \
-  WANDB_RUN_NAME="tf_${condition}_${run_ts}" \
+  WANDB_RUN_NAME="tf_${run_label}_${run_ts}" \
   PROJECT_NAME="$PROJECT_NAME" \
   bash scripts/train/train_cf_ablation.sh
   log "Condition $condition: TF complete"
@@ -87,11 +92,11 @@ for condition in ${RUN_CONDITIONS:-sink0_local6 sink0_local9 sink1_local6 sink1_
   CONFIG="$CONFIG_DIR/cd_${condition}.yaml" \
   RUN_ROOT="$run_root" \
   STAGE=cd \
-  CONDITION="$condition" \
+  CONDITION="$run_label" \
   NUM_GPUS="$NUM_GPUS" \
   MASTER_PORT="$cd_port" \
   WANDB_MODE="$WANDB_MODE" \
-  WANDB_RUN_NAME="cd_${condition}_${run_ts}" \
+  WANDB_RUN_NAME="cd_${run_label}_${run_ts}" \
   PROJECT_NAME="$PROJECT_NAME" \
   bash scripts/train/train_cf_ablation.sh
   log "Condition $condition: CD complete"
