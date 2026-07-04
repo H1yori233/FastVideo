@@ -30,6 +30,7 @@ from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from multiprocessing import shared_memory
 from typing import Any, Optional
 from unittest.mock import patch
@@ -46,6 +47,13 @@ from fastvideo.distributed.utils import StatelessProcessGroup
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+def _distributed_timeout() -> timedelta | None:
+    raw = os.environ.get("FASTVIDEO_DIST_TIMEOUT_MINUTES")
+    if not raw:
+        return None
+    return timedelta(minutes=float(raw))
 
 
 @dataclass
@@ -160,11 +168,18 @@ class GroupCoordinator:
         self.device_group = None
         self.cpu_group = None
 
+        group_kwargs = {}
+        timeout = _distributed_timeout()
+        if timeout is not None:
+            group_kwargs["timeout"] = timeout
+
         for ranks in group_ranks:
-            device_group = torch.distributed.new_group(ranks, backend=torch_distributed_backend)
+            device_group = torch.distributed.new_group(
+                ranks, backend=torch_distributed_backend, **group_kwargs)
             # a group with `gloo` backend, to allow direct coordination between
             # processes through the CPU.
-            cpu_group = torch.distributed.new_group(ranks, backend="gloo")
+            cpu_group = torch.distributed.new_group(
+                ranks, backend="gloo", **group_kwargs)
             if self.rank in ranks:
                 self.ranks = ranks
                 self.world_size = len(ranks)
@@ -746,10 +761,15 @@ def init_distributed_environment(
         assert distributed_init_method is not None, ("distributed_init_method must be provided when initializing "
                                                      "distributed environment")
 
+        init_kwargs = {}
+        timeout = _distributed_timeout()
+        if timeout is not None:
+            init_kwargs["timeout"] = timeout
         torch.distributed.init_process_group(backend=backend,
                                              init_method=distributed_init_method,
                                              world_size=world_size,
-                                             rank=rank)
+                                             rank=rank,
+                                             **init_kwargs)
     # set the local rank
     # local_rank is not available in torch ProcessGroup,
     # see https://github.com/pytorch/pytorch/issues/122816

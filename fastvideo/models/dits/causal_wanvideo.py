@@ -130,7 +130,10 @@ class CausalWanSelfAttention(nn.Module):
                 key=padded_roped_key.transpose(2, 1),
                 value=padded_v.transpose(2, 1),
                 block_mask=block_mask
-            )[:, :, :-padded_length].transpose(2, 1)
+            )
+            if padded_length:
+                x = x[:, :, :-padded_length]
+            x = x.transpose(2, 1)
         else:
             current_end = current_start + q.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
@@ -446,6 +449,53 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.__post_init__()
 
     @staticmethod
+    def _token_range_to_block_indices(start: int, end: int, block_size: int,
+                                      max_blocks: int) -> list[int]:
+        start = max(0, start)
+        end = min(max(start, end), max_blocks * block_size)
+        if end <= start:
+            return []
+        return list(range(start // block_size, (end - 1) // block_size + 1))
+
+    @staticmethod
+    def _block_mask_from_kv_rows(
+        kv_rows: list[list[int]],
+        q_len: int,
+        kv_len: int,
+        block_size: int,
+        device: torch.device | str,
+        mask_mod,
+        all_blocks_full: bool,
+    ) -> BlockMask:
+        q_blocks = math.ceil(q_len / block_size)
+        kv_blocks = math.ceil(kv_len / block_size)
+        kv_num_blocks_cpu = torch.tensor(
+            [len(row) for row in kv_rows], dtype=torch.int32
+        ).view(1, 1, q_blocks)
+        kv_indices_cpu = torch.zeros(
+            (1, 1, q_blocks, kv_blocks), dtype=torch.int32
+        )
+        for row_idx, cols in enumerate(kv_rows):
+            if cols:
+                kv_indices_cpu[0, 0, row_idx, :len(cols)] = torch.tensor(
+                    cols, dtype=torch.int32
+                )
+
+        kv_num_blocks = kv_num_blocks_cpu.to(device=device)
+        kv_indices = kv_indices_cpu.to(device=device)
+        full_kv_num_blocks = kv_num_blocks.clone() if all_blocks_full else None
+        full_kv_indices = kv_indices.clone() if all_blocks_full else None
+        return BlockMask.from_kv_blocks(
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            BLOCK_SIZE=block_size,
+            mask_mod=mask_mod,
+            seq_lengths=(q_len, kv_len),
+        )
+
+    @staticmethod
     def _prepare_blockwise_causal_attn_mask(
         device: torch.device | str, num_frames: int = 21,
         frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1,
@@ -490,13 +540,56 @@ class CausalWanTransformer3DModel(BaseDiT):
                 return in_window | in_sink | (q_idx == kv_idx)
             # return ((kv_idx < total_length) & (q_idx < total_length))  | (q_idx == kv_idx) # bidirectional mask
 
-        block_mask = create_block_mask(attention_mask, B=None, H=None, Q_LEN=total_length + padded_length,
-                                       KV_LEN=total_length + padded_length, _compile=False, device=device)
+        q_len = total_length + padded_length
+        kv_len = q_len
+        block_size = 128
+        q_blocks = math.ceil(q_len / block_size)
+        kv_blocks = math.ceil(kv_len / block_size)
+        all_blocks_full = (
+            padded_length == 0
+            and frame_seqlen % block_size == 0
+            and (frame_seqlen * num_frame_per_block) % block_size == 0
+        )
+        kv_rows = []
+        for q_block in range(q_blocks):
+            q_start = q_block * block_size
+            q_end = min(q_start + block_size, q_len)
+            cols = []
+            if q_start < total_length:
+                q_last = min(q_end, total_length) - 1
+                block_end = min(
+                    ((q_last // (frame_seqlen * num_frame_per_block)) + 1)
+                    * frame_seqlen * num_frame_per_block,
+                    total_length,
+                )
+                if local_attn_size == -1:
+                    cols.extend(CausalWanTransformer3DModel._token_range_to_block_indices(
+                        0, block_end, block_size, kv_blocks))
+                else:
+                    window_tokens = max(0, local_attn_size - sink_size) * frame_seqlen
+                    window_start = block_end - window_tokens
+                    sink_end = min(sink_size * frame_seqlen, block_end)
+                    cols.extend(CausalWanTransformer3DModel._token_range_to_block_indices(
+                        window_start, block_end, block_size, kv_blocks))
+                    cols.extend(CausalWanTransformer3DModel._token_range_to_block_indices(
+                        0, sink_end, block_size, kv_blocks))
+            cols.append(min(q_block, kv_blocks - 1))
+            kv_rows.append(sorted(set(cols)))
+
+        block_mask = CausalWanTransformer3DModel._block_mask_from_kv_rows(
+            kv_rows=kv_rows,
+            q_len=q_len,
+            kv_len=kv_len,
+            block_size=block_size,
+            device=device,
+            mask_mod=attention_mask,
+            all_blocks_full=all_blocks_full,
+        )
 
         if not dist.is_initialized() or dist.get_rank() == 0:
             print(
                 f" cache a block wise causal mask with block size of {num_frame_per_block} frames")
-            print(block_mask)
+            print(f"BlockMask(shape={block_mask.shape}, sparsity={block_mask.sparsity():.2f}%)")
 
         # import imageio
         # import numpy as np
@@ -556,14 +649,66 @@ class CausalWanTransformer3DModel(BaseDiT):
             eye_mask = q_idx == kv_idx
             return eye_mask | clean_mask | noise_mask
 
-        block_mask = create_block_mask(
-            attention_mask, B=None, H=None,
-            Q_LEN=total_length + padded_length, KV_LEN=total_length + padded_length,
-            _compile=False, device=device)
+        q_len = total_length + padded_length
+        kv_len = q_len
+        block_size = 128
+        q_blocks = math.ceil(q_len / block_size)
+        kv_blocks = math.ceil(kv_len / block_size)
+        all_blocks_full = (
+            padded_length == 0
+            and frame_seqlen % block_size == 0
+            and attention_block_size % block_size == 0
+        )
+        kv_rows = []
+        for q_block in range(q_blocks):
+            q_start = q_block * block_size
+            q_end = min(q_start + block_size, q_len)
+            cols = []
+
+            if q_start < clean_ends:
+                clean_last = min(q_end, clean_ends) - 1
+                if clean_last >= q_start:
+                    context_end = min(
+                        ((clean_last // attention_block_size) + 1)
+                        * attention_block_size,
+                        clean_ends,
+                    )
+                    cols.extend(CausalWanTransformer3DModel._token_range_to_block_indices(
+                        0, context_end, block_size, kv_blocks))
+
+            if q_end > clean_ends and q_start < total_length:
+                noisy_start = max(q_start, clean_ends)
+                noisy_last = min(q_end, total_length) - 1
+                if noisy_last >= noisy_start:
+                    first_noise_block = (noisy_start - clean_ends) // attention_block_size
+                    last_noise_block = (noisy_last - clean_ends) // attention_block_size
+                    clean_context_end = min(
+                        last_noise_block * attention_block_size, clean_ends
+                    )
+                    cols.extend(CausalWanTransformer3DModel._token_range_to_block_indices(
+                        0, clean_context_end, block_size, kv_blocks))
+                    for noise_block in range(first_noise_block, last_noise_block + 1):
+                        noise_start = clean_ends + noise_block * attention_block_size
+                        noise_end = min(noise_start + attention_block_size, total_length)
+                        cols.extend(CausalWanTransformer3DModel._token_range_to_block_indices(
+                            noise_start, noise_end, block_size, kv_blocks))
+
+            cols.append(min(q_block, kv_blocks - 1))
+            kv_rows.append(sorted(set(cols)))
+
+        block_mask = CausalWanTransformer3DModel._block_mask_from_kv_rows(
+            kv_rows=kv_rows,
+            q_len=q_len,
+            kv_len=kv_len,
+            block_size=block_size,
+            device=device,
+            mask_mod=attention_mask,
+            all_blocks_full=all_blocks_full,
+        )
 
         if not dist.is_initialized() or dist.get_rank() == 0:
             print(f" cache a teacher-forcing mask with block size of {num_frame_per_block} frames")
-            print(block_mask)
+            print(f"BlockMask(shape={block_mask.shape}, sparsity={block_mask.sparsity():.2f}%)")
 
         return block_mask
 
