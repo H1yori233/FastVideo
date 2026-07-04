@@ -106,6 +106,8 @@ class CausalWanSelfAttention(nn.Module):
         block_end = min(max(0, block_end), context_limit)
         if block_end <= 0:
             return []
+        if self.local_attn_size == -1:
+            return [(0, block_end)]
 
         ranges: list[tuple[int, int]] = []
         sink_end = min(max(0, self.sink_size) * frame_seqlen, block_end)
@@ -217,7 +219,9 @@ class CausalWanSelfAttention(nn.Module):
             roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
             roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
-        if kv_cache is None and self.local_attn_size != -1:
+        if kv_cache is None and (
+            self.local_attn_size != -1 or teacher_forcing_clean_len is not None
+        ):
             x = self._blockwise_local_attention(
                 roped_query,
                 roped_key,
@@ -1123,12 +1127,19 @@ class CausalWanTransformer3DModel(BaseDiT):
                          torch.cat([freqs_sin, freqs_sin], dim=0))
 
         # 4. Transformer blocks
-        local_training_attention = self.local_attn_size != -1
-        if local_training_attention and not self._logged_local_training_attention:
+        blockwise_training_attention = (
+            self.local_attn_size != -1 or teacher_forcing_clean_len is not None
+        )
+        if blockwise_training_attention and not self._logged_local_training_attention:
             if not dist.is_initialized() or dist.get_rank() == 0:
+                scope = (
+                    "teacher-forcing full"
+                    if self.local_attn_size == -1 and teacher_forcing_clean_len is not None
+                    else "local"
+                )
                 print(
-                    "Using FlashAttention block-local training path "
-                    f"(local_attn_size={self.local_attn_size}, sink_size={self.sink_size}, "
+                    "Using FlashAttention blockwise training path "
+                    f"({scope}, local_attn_size={self.local_attn_size}, sink_size={self.sink_size}, "
                     f"num_frame_per_block={self.num_frame_per_block})")
             self._logged_local_training_attention = True
 

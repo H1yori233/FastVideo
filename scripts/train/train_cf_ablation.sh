@@ -57,6 +57,8 @@ export CHECKPOINT_STEPS="${CHECKPOINT_STEPS:-}"
 export CHECKPOINT_TOTAL_LIMIT="${CHECKPOINT_TOTAL_LIMIT:-}"
 export VALIDATION_EVERY_STEPS="${VALIDATION_EVERY_STEPS:-}"
 export GRADIENT_CHECKPOINTING_TYPE="${GRADIENT_CHECKPOINTING_TYPE:-}"
+export LOCAL_ATTN_SIZE="${LOCAL_ATTN_SIZE:-}"
+export SINK_SIZE="${SINK_SIZE:-}"
 
 "$ENV_DIR/bin/python" - "$SOURCE_CONFIG" "$RUN_CONFIG" <<'PY'
 import os
@@ -94,6 +96,8 @@ set_if_env(("training", "loop", "max_train_steps"), "MAX_TRAIN_STEPS", int)
 set_if_env(("training", "checkpoint", "training_state_checkpointing_steps"), "CHECKPOINT_STEPS", int)
 set_if_env(("training", "checkpoint", "checkpoints_total_limit"), "CHECKPOINT_TOTAL_LIMIT", int)
 set_if_env(("callbacks", "validation", "every_steps"), "VALIDATION_EVERY_STEPS", int)
+set_if_env(("pipeline", "dit_config", "local_attn_size"), "LOCAL_ATTN_SIZE", int)
+set_if_env(("pipeline", "dit_config", "sink_size"), "SINK_SIZE", int)
 
 def nullable_str(raw):
     if raw.lower() in {"none", "null", "false", "0"}:
@@ -118,6 +122,8 @@ checkpoint_dir=$CHECKPOINT_DIR
 validation_dir=$VALIDATION_DIR
 num_gpus=$NUM_GPUS
 master_port=$MASTER_PORT
+local_attn_size_override=$LOCAL_ATTN_SIZE
+sink_size_override=$SINK_SIZE
 gradient_checkpointing_type=${GRADIENT_CHECKPOINTING_TYPE:-default}
 wandb_mode=${WANDB_MODE:-online}
 wandb_api_key_set=$([[ -n "${WANDB_API_KEY:-}" ]] && echo true || echo false)
