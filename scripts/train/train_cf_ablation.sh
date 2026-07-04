@@ -59,6 +59,7 @@ export VALIDATION_EVERY_STEPS="${VALIDATION_EVERY_STEPS:-}"
 export GRADIENT_CHECKPOINTING_TYPE="${GRADIENT_CHECKPOINTING_TYPE:-}"
 export LOCAL_ATTN_SIZE="${LOCAL_ATTN_SIZE:-}"
 export SINK_SIZE="${SINK_SIZE:-}"
+export ROPE_CACHE_POLICY="${ROPE_CACHE_POLICY:-}"
 export STREAMING_TEACHER_FORCING="${STREAMING_TEACHER_FORCING:-}"
 
 "$ENV_DIR/bin/python" - "$SOURCE_CONFIG" "$RUN_CONFIG" <<'PY'
@@ -99,6 +100,7 @@ set_if_env(("training", "checkpoint", "checkpoints_total_limit"), "CHECKPOINT_TO
 set_if_env(("callbacks", "validation", "every_steps"), "VALIDATION_EVERY_STEPS", int)
 set_if_env(("pipeline", "dit_config", "local_attn_size"), "LOCAL_ATTN_SIZE", int)
 set_if_env(("pipeline", "dit_config", "sink_size"), "SINK_SIZE", int)
+set_if_env(("pipeline", "dit_config", "rope_cache_policy"), "ROPE_CACHE_POLICY", str)
 set_if_env(("method", "streaming_teacher_forcing"), "STREAMING_TEACHER_FORCING", lambda raw: raw.lower() in {"1", "true", "yes", "on"})
 
 def nullable_str(raw):
@@ -126,6 +128,7 @@ num_gpus=$NUM_GPUS
 master_port=$MASTER_PORT
 local_attn_size_override=$LOCAL_ATTN_SIZE
 sink_size_override=$SINK_SIZE
+rope_cache_policy_override=$ROPE_CACHE_POLICY
 streaming_teacher_forcing_override=$STREAMING_TEACHER_FORCING
 gradient_checkpointing_type=${GRADIENT_CHECKPOINTING_TYPE:-default}
 wandb_mode=${WANDB_MODE:-online}

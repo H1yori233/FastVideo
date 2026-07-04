@@ -8,10 +8,24 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
+from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.train.methods.base import LogScalar, TrainingMethod
-from fastvideo.train.models.base import ModelBase
+from fastvideo.train.models.base import CausalModelBase, ModelBase
 from fastvideo.train.utils.optimizer import build_optimizer_and_scheduler
+
+
+logger = init_logger(__name__)
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 class CausalConsistencyDistillationMethod(TrainingMethod):
@@ -40,6 +54,12 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         self._discrete_cd_n = int(self.method_config.get("discrete_cd_N", 48))
         if self._discrete_cd_n < 2:
             raise ValueError("method.discrete_cd_N must be >= 2")
+        self._chunk_size = int(self.method_config.get("chunk_size", 3))
+        if self._chunk_size <= 0:
+            raise ValueError("method.chunk_size must be positive")
+        self._streaming_causal_cd = _as_bool(
+            self.method_config.get("streaming_causal_cd", False))
+        self._logged_streaming_causal_cd = False
         self._ema_decay = float(self.method_config.get("ema_decay", 0.99))
         self._ema_start_step = int(self.method_config.get("ema_start_step", 200))
         shift = getattr(self.training_config.pipeline_config, "flow_shift", None)
@@ -91,6 +111,7 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         clean_latents = training_batch.latents
         if not torch.is_tensor(clean_latents) or clean_latents.ndim != 5:
             raise ValueError("Causal-CD expects [B, T, C, H, W] latents")
+        self._validate_streaming_chunk_size()
 
         batch_size, num_latents = int(clean_latents.shape[0]), int(clean_latents.shape[1])
         device = clean_latents.device
@@ -189,6 +210,15 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
         conditional: bool,
         clean_x: torch.Tensor,
     ) -> torch.Tensor:
+        if self._streaming_causal_cd:
+            return self._predict_flow_streaming(
+                model,
+                latents,
+                timestep,
+                batch,
+                conditional=conditional,
+                clean_x=clean_x,
+            )
         return model.predict_noise(latents,
                                    timestep,
                                    batch,
@@ -196,6 +226,83 @@ class CausalConsistencyDistillationMethod(TrainingMethod):
                                    cfg_uncond=None,
                                    attn_kind=self._attn_kind,
                                    clean_x=clean_x)
+
+    def _predict_flow_streaming(
+        self,
+        model: ModelBase,
+        latents: torch.Tensor,
+        timestep: torch.Tensor,
+        batch: Any,
+        *,
+        conditional: bool,
+        clean_x: torch.Tensor,
+    ) -> torch.Tensor:
+        if not isinstance(model, CausalModelBase):
+            raise ValueError("streaming_causal_cd requires causal role models "
+                             "implementing CausalModelBase")
+        if not self._logged_streaming_causal_cd:
+            logger.info(
+                "Using streaming causal-CD path "
+                "(chunk_size=%d, attn_kind=%s)",
+                self._chunk_size,
+                self._attn_kind,
+            )
+            self._logged_streaming_causal_cd = True
+
+        batch_size, num_latents = latents.shape[:2]
+        cache_tag = f"causal_cd_{'cond' if conditional else 'uncond'}"
+        model.clear_caches(cache_tag=cache_tag)
+        preds: list[torch.Tensor] = []
+        try:
+            for start in range(0, int(num_latents), self._chunk_size):
+                end = min(start + self._chunk_size, int(num_latents))
+                pred = model.predict_noise_streaming(
+                    latents[:, start:end],
+                    timestep[:, start:end],
+                    batch,
+                    conditional=conditional,
+                    cache_tag=cache_tag,
+                    store_kv=False,
+                    cur_start_frame=start,
+                    attn_kind=self._attn_kind,
+                )
+                if pred is None:
+                    raise RuntimeError("predict_noise_streaming returned "
+                                       "None for causal-CD prediction")
+                preds.append(pred)
+
+                clean_timestep = torch.zeros(
+                    (int(batch_size), end - start),
+                    device=clean_x.device,
+                    dtype=timestep.dtype,
+                )
+                _ = model.predict_noise_streaming(
+                    clean_x[:, start:end],
+                    clean_timestep,
+                    batch,
+                    conditional=conditional,
+                    cache_tag=cache_tag,
+                    store_kv=True,
+                    cur_start_frame=start,
+                    attn_kind=self._attn_kind,
+                )
+        finally:
+            model.clear_caches(cache_tag=cache_tag)
+
+        return torch.cat(preds, dim=1)
+
+    def _validate_streaming_chunk_size(self) -> None:
+        if not self._streaming_causal_cd:
+            return
+        expected = getattr(
+            self.student.transformer,
+            "num_frame_per_block",
+            None,
+        )
+        if expected is not None and int(expected) != int(self._chunk_size):
+            raise ValueError("streaming_causal_cd chunk_size must match "
+                             "transformer.num_frame_per_block "
+                             f"(got {self._chunk_size}, expected {expected})")
 
     @torch.no_grad()
     def _update_ema(self) -> None:

@@ -574,6 +574,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         self.block_mask = None
         self.teacher_forcing_block_mask = None
         self._logged_local_training_attention = False
+        self._logged_relativistic_rope = False
         self.num_frame_per_block = config.arch_config.num_frames_per_block
         assert self.num_frame_per_block <= 3
         self.independent_first_frame = False
@@ -939,6 +940,14 @@ class CausalWanTransformer3DModel(BaseDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         if self.rope_cache_policy == "relativistic":
+            if not self._logged_relativistic_rope:
+                logger.info(
+                    "Using relativistic RoPE cache policy "
+                    "(local_attn_size=%d, sink_size=%d)",
+                    self.local_attn_size,
+                    self.sink_size,
+                )
+                self._logged_relativistic_rope = True
             # fixed table over [0, max_attention_frames); attention slices it per step
             max_attention_frames = (
                 GLOBAL_ATTN_COMPAT_MAX_LATENT_FRAMES
