@@ -29,9 +29,30 @@ _SELECTIVE_ACTIVATION_CHECKPOINTING_OPS = {
 }
 
 
+def _parse_checkpointing_type(
+    checkpointing_type: str | CheckpointType,
+    n_layer: int,
+) -> tuple[CheckpointType, int]:
+    raw = checkpointing_type.value if isinstance(
+        checkpointing_type, CheckpointType) else str(checkpointing_type)
+    if raw.startswith(f"{CheckpointType.BLOCK_SKIP.value}:"):
+        raw_n_layer = raw.split(":", 1)[1]
+        try:
+            n_layer = int(raw_n_layer)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid block_skip checkpointing interval: {raw_n_layer}") from exc
+        raw = CheckpointType.BLOCK_SKIP.value
+    if n_layer <= 0:
+        raise ValueError(f"Checkpointing n_layer must be positive, got {n_layer}")
+    return CheckpointType(raw), n_layer
+
+
 def apply_activation_checkpointing(module: torch.nn.Module,
                                    checkpointing_type: str = CheckpointType.FULL,
                                    n_layer: int = 1) -> torch.nn.Module:
+    checkpointing_type, n_layer = _parse_checkpointing_type(
+        checkpointing_type, n_layer)
     if checkpointing_type == CheckpointType.FULL:
         module = _apply_activation_checkpointing_blocks(module)
     elif checkpointing_type == CheckpointType.OPS:
