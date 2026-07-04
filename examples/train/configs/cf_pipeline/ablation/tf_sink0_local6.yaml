@@ -7,6 +7,7 @@ models:
 method:
   _target_: fastvideo.train.methods.fine_tuning.tfsft.TeacherForcingSFTMethod
   chunk_size: 3
+  streaming_teacher_forcing: true
 
 training:
   distributed:
@@ -16,14 +17,14 @@ training:
     hsdp_replicate_dim: 1
     hsdp_shard_dim: 4
   data:
-    data_path: /mnt/lustre/vlm-k1kong/datasets/Wan-Syn_77x768x1280_250k
+    data_path: /mnt/lustre/vlm-k1kong/datasets/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
     dataloader_num_workers: 0
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
     num_latent_t: 20
-    num_height: 768
-    num_width: 1280
+    num_height: 480
+    num_width: 832
     num_frames: 77
   optimizer:
     learning_rate: 2.0e-6
@@ -65,3 +66,4 @@ pipeline:
   dit_config:
     local_attn_size: 6
     sink_size: 0
+    rope_cache_policy: relativistic

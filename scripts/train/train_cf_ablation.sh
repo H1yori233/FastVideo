@@ -56,6 +56,11 @@ export MAX_TRAIN_STEPS="${MAX_TRAIN_STEPS:-}"
 export CHECKPOINT_STEPS="${CHECKPOINT_STEPS:-}"
 export CHECKPOINT_TOTAL_LIMIT="${CHECKPOINT_TOTAL_LIMIT:-}"
 export VALIDATION_EVERY_STEPS="${VALIDATION_EVERY_STEPS:-}"
+export GRADIENT_CHECKPOINTING_TYPE="${GRADIENT_CHECKPOINTING_TYPE:-}"
+export LOCAL_ATTN_SIZE="${LOCAL_ATTN_SIZE:-}"
+export SINK_SIZE="${SINK_SIZE:-}"
+export ROPE_CACHE_POLICY="${ROPE_CACHE_POLICY:-}"
+export STREAMING_TEACHER_FORCING="${STREAMING_TEACHER_FORCING:-}"
 
 "$ENV_DIR/bin/python" - "$SOURCE_CONFIG" "$RUN_CONFIG" <<'PY'
 import os
@@ -93,6 +98,17 @@ set_if_env(("training", "loop", "max_train_steps"), "MAX_TRAIN_STEPS", int)
 set_if_env(("training", "checkpoint", "training_state_checkpointing_steps"), "CHECKPOINT_STEPS", int)
 set_if_env(("training", "checkpoint", "checkpoints_total_limit"), "CHECKPOINT_TOTAL_LIMIT", int)
 set_if_env(("callbacks", "validation", "every_steps"), "VALIDATION_EVERY_STEPS", int)
+set_if_env(("pipeline", "dit_config", "local_attn_size"), "LOCAL_ATTN_SIZE", int)
+set_if_env(("pipeline", "dit_config", "sink_size"), "SINK_SIZE", int)
+set_if_env(("pipeline", "dit_config", "rope_cache_policy"), "ROPE_CACHE_POLICY", str)
+set_if_env(("method", "streaming_teacher_forcing"), "STREAMING_TEACHER_FORCING", lambda raw: raw.lower() in {"1", "true", "yes", "on"})
+
+def nullable_str(raw):
+    if raw.lower() in {"none", "null", "false", "0"}:
+        return None
+    return raw
+
+set_if_env(("training", "model", "enable_gradient_checkpointing_type"), "GRADIENT_CHECKPOINTING_TYPE", nullable_str)
 
 Path(dst).write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
 PY
@@ -110,6 +126,11 @@ checkpoint_dir=$CHECKPOINT_DIR
 validation_dir=$VALIDATION_DIR
 num_gpus=$NUM_GPUS
 master_port=$MASTER_PORT
+local_attn_size_override=$LOCAL_ATTN_SIZE
+sink_size_override=$SINK_SIZE
+rope_cache_policy_override=$ROPE_CACHE_POLICY
+streaming_teacher_forcing_override=$STREAMING_TEACHER_FORCING
+gradient_checkpointing_type=${GRADIENT_CHECKPOINTING_TYPE:-default}
 wandb_mode=${WANDB_MODE:-online}
 wandb_api_key_set=$([[ -n "${WANDB_API_KEY:-}" ]] && echo true || echo false)
 EOF
@@ -148,6 +169,7 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_BASE_URL="${WANDB_BASE_URL:-https://api.wandb.ai}"
 export FASTVIDEO_ATTENTION_BACKEND="${FASTVIDEO_ATTENTION_BACKEND:-FLASH_ATTN}"
+export FASTVIDEO_FLEX_ATTENTION_COMPILE_MODE="${FASTVIDEO_FLEX_ATTENTION_COMPILE_MODE:-default}"
 export FASTVIDEO_DIST_TIMEOUT_MINUTES="${FASTVIDEO_DIST_TIMEOUT_MINUTES:-120}"
 export TORCH_NCCL_BLOCKING_WAIT="${TORCH_NCCL_BLOCKING_WAIT:-1}"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/mnt/lustre/vlm-k1kong/triton-cache/fastvideo-cf}"
