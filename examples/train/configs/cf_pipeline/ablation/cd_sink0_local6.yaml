@@ -30,14 +30,14 @@ training:
     hsdp_replicate_dim: 1
     hsdp_shard_dim: 4
   data:
-    data_path: /mnt/lustre/vlm-k1kong/datasets/Wan-Syn_77x768x1280_250k
+    data_path: /mnt/lustre/vlm-k1kong/datasets/HD-Mixkit-Finetune-Wan/combined_parquet_dataset
     dataloader_num_workers: 0
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
     num_latent_t: 20
-    num_height: 768
-    num_width: 1280
+    num_height: 480
+    num_width: 832
     num_frames: 77
   optimizer:
     learning_rate: 2.0e-6
@@ -69,7 +69,7 @@ callbacks:
     every_steps: 200
     sampling_steps: [4]
     guidance_scale: 6.0
-    num_frames: 81
+    num_frames: 77
     output_dir: __VALIDATION_DIR__
     offload_training_state: true
     unload_pipeline_after_validation: true
