@@ -10,6 +10,10 @@ import torch
 from fastvideo.train.methods.fine_tuning.dfsft import (
     DiffusionForcingSFTMethod, )
 from fastvideo.train.models.base import CausalModelBase
+from fastvideo.logger import init_logger
+
+
+logger = init_logger(__name__)
 
 
 def _as_bool(value: Any) -> bool:
@@ -33,6 +37,7 @@ class TeacherForcingSFTMethod(DiffusionForcingSFTMethod):
         super().__init__(cfg=cfg, role_models=role_models)
         self._streaming_teacher_forcing = _as_bool(
             self.method_config.get("streaming_teacher_forcing", False))
+        self._logged_streaming_teacher_forcing = False
 
     def _predict_noise(
         self,
@@ -71,6 +76,14 @@ class TeacherForcingSFTMethod(DiffusionForcingSFTMethod):
         chunk = int(self._chunk_size)
         if chunk <= 0:
             raise ValueError("chunk_size must be positive")
+        if not self._logged_streaming_teacher_forcing:
+            logger.info(
+                "Using streaming teacher-forcing path "
+                "(chunk_size=%d, attn_kind=%s)",
+                chunk,
+                self._attn_kind,
+            )
+            self._logged_streaming_teacher_forcing = True
 
         batch_size, num_latents = noisy_latents.shape[:2]
         cache_tag = "teacher_forcing"
