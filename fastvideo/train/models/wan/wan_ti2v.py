@@ -96,11 +96,9 @@ class WanTI2VModel(WanModel):
             raise ValueError("Wan 2.2 TI2V first_frame_latent must have shape [B, C, T, H, W], "
                              f"got {tuple(value.shape)}")
 
-        expected_frames = int(self.training_config.data.num_latent_t)
-        if value.shape[2] < expected_frames:
-            raise ValueError("Wan 2.2 TI2V first_frame_latent has fewer latent frames than requested: "
-                             f"got {value.shape[2]}, expected at least {expected_frames}")
-        value = value[:, :, :expected_frames]
+        if value.shape[2] < 1:
+            raise ValueError("Wan 2.2 TI2V first_frame_latent must contain at least one latent frame")
+        value = value[:, :, :1]
         return value.to(device=self.device, dtype=self._get_training_dtype())
 
     def _apply_first_frame_latent(
@@ -109,10 +107,24 @@ class WanTI2VModel(WanModel):
         timestep: torch.Tensor,
         first_frame_latent: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        first_frame_latent = first_frame_latent[:, :, :hidden_states.shape[2]]
-        if first_frame_latent.shape != hidden_states.shape:
-            raise ValueError("Wan 2.2 TI2V first_frame_latent shape must match hidden_states: "
-                             f"{tuple(first_frame_latent.shape)} vs {tuple(hidden_states.shape)}")
+        if first_frame_latent.ndim != 5 or first_frame_latent.shape[2] < 1:
+            raise ValueError("Wan 2.2 TI2V first_frame_latent must have shape [B, C, T, H, W] with T >= 1, "
+                             f"got {tuple(first_frame_latent.shape)}")
+        conditioning_shape = (
+            first_frame_latent.shape[0],
+            first_frame_latent.shape[1],
+            first_frame_latent.shape[3],
+            first_frame_latent.shape[4],
+        )
+        hidden_shape = (
+            hidden_states.shape[0],
+            hidden_states.shape[1],
+            hidden_states.shape[3],
+            hidden_states.shape[4],
+        )
+        if conditioning_shape != hidden_shape:
+            raise ValueError("Wan 2.2 TI2V first_frame_latent batch/channel/spatial dimensions must match "
+                             f"hidden_states: {conditioning_shape} vs {hidden_shape}")
 
         hidden_states = torch.cat(
             [
