@@ -5,6 +5,31 @@ import numpy as np
 import torch
 
 
+def _tensor_from_bytes(
+    bytes_data: bytes,
+    shape: list[int] | tuple[int, ...],
+    dtype_name: str | None,
+) -> torch.Tensor:
+    """Decode a tensor using the dtype stored alongside its raw bytes."""
+    normalized_dtype = str(dtype_name or "float32")
+    for prefix in ("torch.", "numpy.", "np."):
+        if normalized_dtype.startswith(prefix):
+            normalized_dtype = normalized_dtype[len(prefix):]
+            break
+
+    if normalized_dtype in ("bfloat16", "bf16"):
+        data = np.frombuffer(bytes_data, dtype=np.uint16).reshape(shape).copy()
+        return torch.from_numpy(data).view(torch.bfloat16)
+
+    try:
+        numpy_dtype = np.dtype(normalized_dtype)
+    except TypeError as exc:
+        raise ValueError(f"Unsupported serialized tensor dtype: {dtype_name!r}") from exc
+
+    data = np.frombuffer(bytes_data, dtype=numpy_dtype).reshape(shape).copy()
+    return torch.from_numpy(data)
+
+
 def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pad or crop an embedding [L, D] to exactly padding_length tokens.
@@ -142,6 +167,7 @@ def collate_rows_from_parquet_schema(rows,
             # Get tensor data from row using the existing helper function pattern
             shape_key = f"{tensor_name}_shape"
             bytes_key = f"{tensor_name}_bytes"
+            dtype_key = f"{tensor_name}_dtype"
 
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
@@ -167,13 +193,13 @@ def collate_rows_from_parquet_schema(rows,
                                      random.random())
                                     < cfg_rate)
                     if drop:
-                        data = np.zeros(shape, dtype=np.float32)
+                        tensor = torch.zeros(shape, dtype=torch.float32)
                     else:
-                        data = np.frombuffer(
+                        tensor = _tensor_from_bytes(
                             bytes_data,
-                            dtype=np.float32,
-                        ).reshape(shape).copy()
-                    tensor = torch.from_numpy(data)
+                            shape,
+                            row.get(dtype_key),
+                        )
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"
