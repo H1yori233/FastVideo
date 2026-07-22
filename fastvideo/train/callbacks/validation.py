@@ -1182,6 +1182,14 @@ class ValidationCallback(Callback):
             VSA_sparsity=tc.vsa_sparsity,
             timesteps=sampling_timesteps_tensor,
         )
+        logger.info(
+            "Prepared validation batch: size=%sx%s frames=%s image_path=%s video_path=%s",
+            batch.width,
+            batch.height,
+            batch.num_frames,
+            batch.image_path,
+            batch.video_path,
+        )
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 
         # Conditionally set I2V fields.

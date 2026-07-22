@@ -31,7 +31,7 @@ def _wan_ti2v_output_size(
     requested_width: int,
     requested_height: int,
 ) -> tuple[int, int]:
-    """Resolve Wan TI2V size while preserving the historical 480p floor."""
+    """Resolve Wan TI2V size and align explicit high-resolution requests."""
     requested_area = requested_width * requested_height
     if requested_area > _WAN_TI2V_DEFAULT_MAX_AREA:
         return (
@@ -134,6 +134,15 @@ class InputValidationStage(PipelineStage):
                 patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
                 vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
                 dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
+                logger.info(
+                    "Wan TI2V image request: source=%sx%s requested=%sx%s alignment=%sx%s",
+                    iw,
+                    ih,
+                    batch.width,
+                    batch.height,
+                    dw,
+                    dh,
+                )
                 ow, oh = _wan_ti2v_output_size(
                     iw,
                     ih,
