@@ -128,7 +128,12 @@ class TimestepEmbedder(nn.Module):
         t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period,
                                     dtype=self.freq_dtype).to(self.mlp.fc_in.weight.dtype)
         if timestep_seq_len is not None:
-            t_freq = t_freq.unflatten(0, (1, timestep_seq_len))
+            if t_freq.shape[0] % timestep_seq_len != 0:
+                raise ValueError("Flattened timestep count must be divisible by "
+                                 f"timestep_seq_len, got {t_freq.shape[0]} and "
+                                 f"{timestep_seq_len}")
+            batch_size = t_freq.shape[0] // timestep_seq_len
+            t_freq = t_freq.unflatten(0, (batch_size, timestep_seq_len))
         # t_freq = t_freq.to(self.mlp.fc_in.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
