@@ -299,6 +299,8 @@ class TrainingBatch:
     preprocessed_image: torch.Tensor | None = None
     image_embeds: torch.Tensor | None = None
     image_latents: torch.Tensor | None = None
+    # True when latent frame 0 is a clean condition rather than a denoising target.
+    first_frame_conditioning: bool = False
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
 
