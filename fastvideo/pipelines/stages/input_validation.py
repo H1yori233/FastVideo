@@ -33,13 +33,18 @@ def _wan_ti2v_output_size(
 ) -> tuple[int, int]:
     """Resolve Wan TI2V size while preserving the historical 480p floor."""
     requested_area = requested_width * requested_height
-    max_area = max(_WAN_TI2V_DEFAULT_MAX_AREA, requested_area)
+    if requested_area > _WAN_TI2V_DEFAULT_MAX_AREA:
+        return (
+            requested_width // width_multiple * width_multiple,
+            requested_height // height_multiple * height_multiple,
+        )
+
     return best_output_size(
         input_width,
         input_height,
         width_multiple,
         height_multiple,
-        max_area,
+        _WAN_TI2V_DEFAULT_MAX_AREA,
     )
 
 
