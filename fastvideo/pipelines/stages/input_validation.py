@@ -17,8 +17,30 @@ from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
 
+_WAN_TI2V_DEFAULT_MAX_AREA = 480 * 832
+
 # Alias for convenience
 V = StageValidators
+
+
+def _wan_ti2v_output_size(
+    input_width: int,
+    input_height: int,
+    width_multiple: int,
+    height_multiple: int,
+    requested_width: int,
+    requested_height: int,
+) -> tuple[int, int]:
+    """Resolve Wan TI2V size while preserving the historical 480p floor."""
+    requested_area = requested_width * requested_height
+    max_area = max(_WAN_TI2V_DEFAULT_MAX_AREA, requested_area)
+    return best_output_size(
+        input_width,
+        input_height,
+        width_multiple,
+        height_multiple,
+        max_area,
+    )
 
 
 class InputValidationStage(PipelineStage):
@@ -107,8 +129,14 @@ class InputValidationStage(PipelineStage):
                 patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
                 vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
                 dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
-                max_area = 480 * 832
-                ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+                ow, oh = _wan_ti2v_output_size(
+                    iw,
+                    ih,
+                    dw,
+                    dh,
+                    batch.width,
+                    batch.height,
+                )
 
                 scale = max(ow / iw, oh / ih)
                 img = img.resize((round(iw * scale), round(ih * scale)), Image.LANCZOS)

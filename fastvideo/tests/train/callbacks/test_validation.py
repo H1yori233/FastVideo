@@ -45,6 +45,8 @@ def _make_callback(
     sampling_steps: list[int] | None = None,
     guidance_scale: float | None = None,
     num_frames: int | None = None,
+    height: int | None = None,
+    width: int | None = None,
     sampling_timesteps: list[int] | None = None,
     output_dir: str | None = None,
     overlay_actions: bool = False,
@@ -56,6 +58,8 @@ def _make_callback(
         sampling_steps=sampling_steps,
         guidance_scale=guidance_scale,
         num_frames=num_frames,
+        height=height,
+        width=width,
         sampling_timesteps=sampling_timesteps,
         output_dir=output_dir,
         overlay_actions=overlay_actions,
@@ -77,6 +81,8 @@ class TestConstructor:
         assert cb.sampling_steps == [40]
         assert cb.guidance_scale is None
         assert cb.num_frames is None
+        assert cb.height is None
+        assert cb.width is None
         assert cb.sampling_timesteps is None
         assert cb.output_dir is None
         assert cb.overlay_actions is False
@@ -98,6 +104,8 @@ class TestConstructor:
             sampling_steps=["20", "40"],  # type: ignore[arg-type]
             guidance_scale="4.5",  # type: ignore[arg-type]
             num_frames="77",  # type: ignore[arg-type]
+            height="720",  # type: ignore[arg-type]
+            width="1280",  # type: ignore[arg-type]
             sampling_timesteps=["1000", "500"],
             overlay_actions=1,  # type: ignore[arg-type]
             offload_training_state="1",  # type: ignore[arg-type]
@@ -107,10 +115,16 @@ class TestConstructor:
         assert cb.sampling_steps == [20, 40]
         assert cb.guidance_scale == 4.5
         assert cb.num_frames == 77
+        assert cb.height == 720
+        assert cb.width == 1280
         assert cb.sampling_timesteps == [1000, 500]
         assert cb.overlay_actions is True
         assert cb.offload_training_state is True
         assert cb.unload_pipeline_after_validation is False
+
+    def test_height_and_width_must_be_set_together(self) -> None:
+        with pytest.raises(ValueError, match="height and width"):
+            _make_callback(height=720)
 
     def test_pipeline_kwargs_collected(self) -> None:
         cb = ValidationCallback(
