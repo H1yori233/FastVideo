@@ -46,6 +46,48 @@ def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tenso
         return t[:padding_length], torch.ones(padding_length)
 
 
+def _stack_video_latents(
+    tensor_name: str,
+    tensors: list[torch.Tensor],
+) -> torch.Tensor:
+    """Stack ``[C, T, H, W]`` latents with temporal edge padding.
+
+    Short source videos can produce one fewer latent frame than the configured
+    training window. Repeating the final latent keeps batching possible without
+    introducing an artificial zero-valued frame that would be shifted by Wan's
+    latent normalization.
+    """
+    if any(tensor.ndim != 4 or tensor.shape[1] < 1 for tensor in tensors):
+        raise ValueError(
+            f"Field '{tensor_name}' must contain non-empty [C, T, H, W] "
+            "tensors when temporal padding is required."
+        )
+
+    reference_shape = (tensors[0].shape[0], *tensors[0].shape[2:])
+    if any((tensor.shape[0], *tensor.shape[2:]) != reference_shape
+           for tensor in tensors[1:]):
+        shapes = [tuple(tensor.shape) for tensor in tensors]
+        raise ValueError(
+            f"Field '{tensor_name}' may vary only in its temporal dimension; "
+            f"got tensor shapes {shapes}."
+        )
+
+    target_frames = max(int(tensor.shape[1]) for tensor in tensors)
+    padded_tensors = []
+    for tensor in tensors:
+        missing_frames = target_frames - int(tensor.shape[1])
+        if missing_frames:
+            padding = tensor[:, -1:].expand(
+                -1,
+                missing_frames,
+                -1,
+                -1,
+            )
+            tensor = torch.cat((tensor, padding), dim=1)
+        padded_tensors.append(tensor)
+    return torch.stack(padded_tensors)
+
+
 def get_torch_tensors_from_row_dict(row_dict,
                                     keys,
                                     cfg_rate,
@@ -235,8 +277,16 @@ def collate_rows_from_parquet_schema(rows,
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing
             try:
-                batch_data[tensor_name] = torch.stack(tensor_list)
-            except ValueError as e:
+                shapes = {tuple(tensor.shape) for tensor in tensor_list}
+                if (len(shapes) > 1
+                        and tensor_name in {'vae_latent', 'first_frame_latent'}):
+                    batch_data[tensor_name] = _stack_video_latents(
+                        tensor_name,
+                        tensor_list,
+                    )
+                else:
+                    batch_data[tensor_name] = torch.stack(tensor_list)
+            except (RuntimeError, ValueError) as e:
                 shapes = [
                     t.shape
                     if t is not None and hasattr(t, 'shape') else 'None/Invalid'

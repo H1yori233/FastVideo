@@ -29,3 +29,33 @@ def test_collate_rows_respects_serialized_tensor_dtype() -> None:
     assert torch.equal(batch["pil_image"][0], torch.from_numpy(pil_image))
     assert batch["vae_latent"].dtype == torch.float32
     assert torch.equal(batch["vae_latent"][0], torch.from_numpy(vae_latent))
+
+
+def test_collate_rows_pads_variable_length_video_latents() -> None:
+    def make_row(num_frames: int) -> dict[str, object]:
+        vae_latent = np.arange(
+            2 * num_frames * 2 * 3,
+            dtype=np.float32,
+        ).reshape(2, num_frames, 2, 3)
+        first_frame_latent = vae_latent + 100
+        return {
+            "vae_latent_bytes": vae_latent.tobytes(),
+            "vae_latent_shape": list(vae_latent.shape),
+            "vae_latent_dtype": str(vae_latent.dtype),
+            "first_frame_latent_bytes": first_frame_latent.tobytes(),
+            "first_frame_latent_shape": list(first_frame_latent.shape),
+            "first_frame_latent_dtype": str(first_frame_latent.dtype),
+        }
+
+    batch = collate_rows_from_parquet_schema(
+        [make_row(2), make_row(3)],
+        pyarrow_schema_i2v,
+        text_padding_length=8,
+    )
+
+    assert batch["vae_latent"].shape == (2, 2, 3, 2, 3)
+    assert batch["first_frame_latent"].shape == (2, 2, 3, 2, 3)
+    assert torch.equal(batch["vae_latent"][0, :, -1],
+                       batch["vae_latent"][0, :, -2])
+    assert torch.equal(batch["first_frame_latent"][0, :, -1],
+                       batch["first_frame_latent"][0, :, -2])
