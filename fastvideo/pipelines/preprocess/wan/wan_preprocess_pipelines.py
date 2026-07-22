@@ -6,7 +6,8 @@ from fastvideo.pipelines.stages.image_encoding import ImageVAEEncodingStage
 
 
 class PreprocessPipelineI2V(ComposedPipelineBase):
-    _required_config_modules = ["image_encoder", "image_processor", "text_encoder", "tokenizer", "vae"]
+    _required_config_modules = ["text_encoder", "tokenizer", "vae"]
+    _optional_config_modules = ["image_encoder", "image_processor"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         assert fastvideo_args.preprocess_config is not None
