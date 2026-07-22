@@ -21,16 +21,14 @@ from __future__ import annotations
 
 import glob
 import os
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
-import torchaudio
 from safetensors.torch import load_file as safetensors_load_file
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.audio.ltx2_audio_processing import AudioProcessor
 from fastvideo.models.audio.ltx2_audio_vae import LTX2AudioEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -39,6 +37,9 @@ from fastvideo.pipelines.preprocess.preprocess_stages import (TextTransformStage
 from fastvideo.pipelines.stages import EncodingStage, PipelineStage
 
 logger = init_logger(__name__)
+
+if TYPE_CHECKING:
+    from fastvideo.models.audio.ltx2_audio_processing import AudioProcessor
 
 
 class LTX2TextPrecomputeStage(PipelineStage):
@@ -105,6 +106,11 @@ class LTX2AudioEncodingStage(PipelineStage):
         video_path: str,
         target_duration: float,
     ) -> tuple[torch.Tensor, int] | None:
+        try:
+            import torchaudio
+        except ImportError as exc:
+            raise ImportError("LTX-2 audio preprocessing requires the optional torchaudio dependency.") from exc
+
         try:
             waveform, sample_rate = torchaudio.load(video_path)
         except Exception as e:
@@ -180,6 +186,12 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
                 tokenizer.pad_token = tokenizer.eos_token
 
     def _load_ltx2_audio_encoder(self) -> tuple[torch.nn.Module, AudioProcessor]:
+        try:
+            from fastvideo.models.audio.ltx2_audio_processing import (
+                AudioProcessor, )
+        except ImportError as exc:
+            raise ImportError("LTX-2 audio preprocessing requires the optional torchaudio dependency.") from exc
+
         audio_vae_path = os.path.join(self.model_path, "audio_vae")
         if not os.path.isdir(audio_vae_path):
             raise FileNotFoundError(f"Expected audio_vae directory for LTX-2 audio preprocessing: {audio_vae_path}")
