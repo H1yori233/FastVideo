@@ -5,31 +5,6 @@ import numpy as np
 import torch
 
 
-def _tensor_from_bytes(
-    bytes_data: bytes,
-    shape: list[int] | tuple[int, ...],
-    dtype_name: str | None,
-) -> torch.Tensor:
-    """Decode a tensor using the dtype stored alongside its raw bytes."""
-    normalized_dtype = str(dtype_name or "float32")
-    for prefix in ("torch.", "numpy.", "np."):
-        if normalized_dtype.startswith(prefix):
-            normalized_dtype = normalized_dtype[len(prefix):]
-            break
-
-    if normalized_dtype in ("bfloat16", "bf16"):
-        data = np.frombuffer(bytes_data, dtype=np.uint16).reshape(shape).copy()
-        return torch.from_numpy(data).view(torch.bfloat16)
-
-    try:
-        numpy_dtype = np.dtype(normalized_dtype)
-    except TypeError as exc:
-        raise ValueError(f"Unsupported serialized tensor dtype: {dtype_name!r}") from exc
-
-    data = np.frombuffer(bytes_data, dtype=numpy_dtype).reshape(shape).copy()
-    return torch.from_numpy(data)
-
-
 def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pad or crop an embedding [L, D] to exactly padding_length tokens.
@@ -44,48 +19,6 @@ def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tenso
             [torch.ones(L), torch.zeros(padding_length - L)], 0)
     else:  # crop
         return t[:padding_length], torch.ones(padding_length)
-
-
-def _stack_video_latents(
-    tensor_name: str,
-    tensors: list[torch.Tensor],
-) -> torch.Tensor:
-    """Stack ``[C, T, H, W]`` latents with temporal edge padding.
-
-    Short source videos can produce one fewer latent frame than the configured
-    training window. Repeating the final latent keeps batching possible without
-    introducing an artificial zero-valued frame that would be shifted by Wan's
-    latent normalization.
-    """
-    if any(tensor.ndim != 4 or tensor.shape[1] < 1 for tensor in tensors):
-        raise ValueError(
-            f"Field '{tensor_name}' must contain non-empty [C, T, H, W] "
-            "tensors when temporal padding is required."
-        )
-
-    reference_shape = (tensors[0].shape[0], *tensors[0].shape[2:])
-    if any((tensor.shape[0], *tensor.shape[2:]) != reference_shape
-           for tensor in tensors[1:]):
-        shapes = [tuple(tensor.shape) for tensor in tensors]
-        raise ValueError(
-            f"Field '{tensor_name}' may vary only in its temporal dimension; "
-            f"got tensor shapes {shapes}."
-        )
-
-    target_frames = max(int(tensor.shape[1]) for tensor in tensors)
-    padded_tensors = []
-    for tensor in tensors:
-        missing_frames = target_frames - int(tensor.shape[1])
-        if missing_frames:
-            padding = tensor[:, -1:].expand(
-                -1,
-                missing_frames,
-                -1,
-                -1,
-            )
-            tensor = torch.cat((tensor, padding), dim=1)
-        padded_tensors.append(tensor)
-    return torch.stack(padded_tensors)
 
 
 def get_torch_tensors_from_row_dict(row_dict,
@@ -209,7 +142,6 @@ def collate_rows_from_parquet_schema(rows,
             # Get tensor data from row using the existing helper function pattern
             shape_key = f"{tensor_name}_shape"
             bytes_key = f"{tensor_name}_bytes"
-            dtype_key = f"{tensor_name}_dtype"
 
             if shape_key in row and bytes_key in row:
                 shape = row[shape_key]
@@ -235,13 +167,13 @@ def collate_rows_from_parquet_schema(rows,
                                      random.random())
                                     < cfg_rate)
                     if drop:
-                        tensor = torch.zeros(shape, dtype=torch.float32)
+                        data = np.zeros(shape, dtype=np.float32)
                     else:
-                        tensor = _tensor_from_bytes(
+                        data = np.frombuffer(
                             bytes_data,
-                            shape,
-                            row.get(dtype_key),
-                        )
+                            dtype=np.float32,
+                        ).reshape(shape).copy()
+                    tensor = torch.from_numpy(data)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"
@@ -277,16 +209,8 @@ def collate_rows_from_parquet_schema(rows,
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing
             try:
-                shapes = {tuple(tensor.shape) for tensor in tensor_list}
-                if (len(shapes) > 1
-                        and tensor_name in {'vae_latent', 'first_frame_latent'}):
-                    batch_data[tensor_name] = _stack_video_latents(
-                        tensor_name,
-                        tensor_list,
-                    )
-                else:
-                    batch_data[tensor_name] = torch.stack(tensor_list)
-            except (RuntimeError, ValueError) as e:
+                batch_data[tensor_name] = torch.stack(tensor_list)
+            except ValueError as e:
                 shapes = [
                     t.shape
                     if t is not None and hasattr(t, 'shape') else 'None/Invalid'

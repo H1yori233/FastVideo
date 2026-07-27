@@ -127,8 +127,6 @@ class ValidationCallback(Callback):
         sampling_steps: list[int] | None = None,
         guidance_scale: float | None = None,
         num_frames: int | None = None,
-        height: int | None = None,
-        width: int | None = None,
         output_dir: str | None = None,
         sampling_timesteps: list[int] | None = None,
         overlay_actions: bool = False,
@@ -143,10 +141,6 @@ class ValidationCallback(Callback):
         self.sampling_steps = ([int(s) for s in sampling_steps] if sampling_steps else [40])
         self.guidance_scale = (float(guidance_scale) if guidance_scale is not None else None)
         self.num_frames = (int(num_frames) if num_frames is not None else None)
-        if (height is None) != (width is None):
-            raise ValueError("Validation height and width must be set together")
-        self.height = (int(height) if height is not None else None)
-        self.width = (int(width) if width is not None else None)
         self.output_dir = (str(output_dir) if output_dir is not None else None)
         self.sampling_timesteps = ([int(s) for s in sampling_timesteps] if sampling_timesteps is not None else None)
         self.overlay_actions = self._coerce_bool(overlay_actions)
@@ -1135,8 +1129,8 @@ class ValidationCallback(Callback):
         tc = self.training_config
 
         sampling_param.prompt = validation_batch["prompt"]
-        sampling_param.height = (self.height if self.height is not None else tc.data.num_height)
-        sampling_param.width = (self.width if self.width is not None else tc.data.num_width)
+        sampling_param.height = tc.data.num_height
+        sampling_param.width = tc.data.num_width
         sampling_param.num_inference_steps = int(num_inference_steps)
         sampling_param.data_type = "video"
         if self.guidance_scale is not None:
@@ -1181,14 +1175,6 @@ class ValidationCallback(Callback):
             eta=0.0,
             VSA_sparsity=tc.vsa_sparsity,
             timesteps=sampling_timesteps_tensor,
-        )
-        logger.info(
-            "Prepared validation batch: size=%sx%s frames=%s image_path=%s video_path=%s",
-            batch.width,
-            batch.height,
-            batch.num_frames,
-            batch.image_path,
-            batch.video_path,
         )
         batch._inference_args = inference_args  # type: ignore[attr-defined]
 

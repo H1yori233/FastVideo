@@ -3,41 +3,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal
 
 import torch
 
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
-from fastvideo.distributed import get_sp_group, get_world_group
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.train.models.wan.wan import WanModel
-from fastvideo.train.utils.dataloader import build_parquet_t2v_train_dataloader
-from fastvideo.train.utils.moduleloader import load_module_from_path
-
-if TYPE_CHECKING:
-    from fastvideo.train.utils.training_config import TrainingConfig
 
 
 class WanTI2VModel(WanModel):
     """Wan 2.2 TI2V model with clean first-frame conditioning."""
-
-    def init_preprocessors(self, training_config: TrainingConfig) -> None:
-        self.vae = load_module_from_path(
-            model_path=str(training_config.model_path),
-            module_type="vae",
-            training_config=training_config,
-        )
-        self.world_group = get_world_group()
-        self.sp_group = get_sp_group()
-        self._init_timestep_mechanics()
-
-        text_len = (training_config.pipeline_config.text_encoder_configs[0].arch_config.text_len)
-        self.dataloader = build_parquet_t2v_train_dataloader(
-            training_config.data,
-            text_len=int(text_len),
-            parquet_schema=pyarrow_schema_i2v,
-        )
-        self.start_step = 0
 
     def prepare_batch(
         self,

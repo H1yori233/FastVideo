@@ -38,6 +38,7 @@ training:
 
   data:
     data_path: data/crush-smol_processed_ti2v/combined_parquet_dataset
+    preprocessed_data_type: i2v
     dataloader_num_workers: 2
     train_batch_size: 1
     training_cfg_rate: 0.0

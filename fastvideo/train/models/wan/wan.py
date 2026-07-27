@@ -167,6 +167,7 @@ class WanModel(ModelBase):
         self._init_timestep_mechanics()
 
         from fastvideo.dataset.dataloader.schema import (
+            pyarrow_schema_i2v,
             pyarrow_schema_t2v,
             pyarrow_schema_text_only,
         )
@@ -181,6 +182,8 @@ class WanModel(ModelBase):
         parquet_schema = pyarrow_schema_t2v
         if preprocessed_data_type == "text_only":
             parquet_schema = pyarrow_schema_text_only
+        elif preprocessed_data_type == "i2v":
+            parquet_schema = pyarrow_schema_i2v
         elif preprocessed_data_type != "t2v":
             raise ValueError("Unsupported Wan preprocessed_data_type: "
                              f"{preprocessed_data_type!r}")
