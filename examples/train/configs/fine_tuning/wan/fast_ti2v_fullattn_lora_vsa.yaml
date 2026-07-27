@@ -1,8 +1,8 @@
 # FastWan 2.2 TI2V 5B FullAttn LoRA finetune with VSA.
 #
 # Notes:
-# - Preprocess the dataset as I2V so each parquet row contains a
-#   first_frame_latent tensor. CLIP features are not consumed by this model.
+# - This model still uses T2V-style preprocessed parquet data in the new
+#   training stack.
 # - Validation/inference should use WanPipeline rather than the I2V pipeline;
 #   TI2V behavior is activated by the model pipeline config and the provided
 #   video_path / image_path from validation data.

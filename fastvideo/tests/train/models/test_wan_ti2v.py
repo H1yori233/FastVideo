@@ -7,7 +7,7 @@ import torch
 from fastvideo.train.models.wan.wan import WanModel
 
 
-def test_ti2v_accepts_single_frame_conditioning_latent() -> None:
+def test_ti2v_conditions_first_frame() -> None:
     model = object.__new__(WanModel)
     object.__setattr__(model, "transformer", SimpleNamespace(patch_size=(1, 2, 2)))
 
@@ -24,11 +24,7 @@ def test_ti2v_accepts_single_frame_conditioning_latent() -> None:
             "first_frame_latent": first_frame_latent,
         },
     )
-    conditioned = kwargs["hidden_states"]
-    expanded_timestep = kwargs["timestep"]
-
-    assert torch.equal(conditioned[:, :, :1], first_frame_latent)
-    assert torch.equal(conditioned[:, :, 1:], hidden_states[:, :, 1:])
-    assert expanded_timestep.shape == (2, 9 * 2 * 3)
-    assert torch.count_nonzero(expanded_timestep[:, :2 * 3]) == 0
-    assert torch.equal(expanded_timestep[0, 2 * 3:], torch.full((8 * 2 * 3,), 500.0))
+    assert torch.equal(kwargs["hidden_states"][:, :, :1], first_frame_latent)
+    assert torch.count_nonzero(kwargs["timestep"][:, :6]) == 0
+    assert torch.equal(kwargs["timestep"][:, 6:],
+                       timestep[:, None].expand(-1, 48))

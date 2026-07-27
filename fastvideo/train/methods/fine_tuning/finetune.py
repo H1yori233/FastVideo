@@ -93,7 +93,6 @@ class FineTuneMethod(TrainingMethod):
         )
 
         if bool(getattr(self.training_config.pipeline_config, "ti2v_task", False)):
-            # Frame 0 is a clean condition at timestep 0, not a denoising target.
             pred = pred[:, 1:]
             noisy_latents = noisy_latents[:, 1:]
             clean_latents = clean_latents[:, 1:]
