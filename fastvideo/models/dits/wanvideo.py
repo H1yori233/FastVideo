@@ -34,6 +34,24 @@ from fastvideo.distributed.parallel_state import get_sp_world_size
 logger = init_logger(__name__)
 
 
+def _prepare_wan_modulation(
+    scale_shift_table: torch.Tensor,
+    temb: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+           torch.Tensor, torch.Tensor]:
+    if temb.dim() == 4:
+        # Wan2.2 TI2V uses token-wise modulation:
+        # [batch_size, seq_len, 6, inner_dim].
+        modulation = scale_shift_table.unsqueeze(0) + temb.float()
+        return tuple(value.squeeze(2)
+                     for value in modulation.chunk(6, dim=2))
+
+    # Wan2.1 and Wan2.2 14B use one modulation per sample:
+    # [batch_size, 6, inner_dim].
+    modulation = scale_shift_table + temb.float()
+    return modulation.chunk(6, dim=1)
+
+
 class WanImageEmbedding(torch.nn.Module):
 
     def __init__(self, in_features: int, out_features: int):
@@ -384,23 +402,8 @@ class WanTransformerBlock(nn.Module):
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
 
-        if temb.dim() == 4:
-            # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table.unsqueeze(0) + temb.float()
-            ).chunk(6, dim=2)
-            # batch_size, seq_len, 1, inner_dim
-            shift_msa = shift_msa.squeeze(2)
-            scale_msa = scale_msa.squeeze(2)
-            gate_msa = gate_msa.squeeze(2)
-            c_shift_msa = c_shift_msa.squeeze(2)
-            c_scale_msa = c_scale_msa.squeeze(2)
-            c_gate_msa = c_gate_msa.squeeze(2)
-        else:
-            # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
-            e = self.scale_shift_table + temb.float()
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-                6, dim=1)
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
+            _prepare_wan_modulation(self.scale_shift_table, temb))
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
@@ -548,9 +551,8 @@ class WanTransformerBlock_VSA(nn.Module):
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
-        e = self.scale_shift_table + temb.float()
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-            6, dim=1)
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
+            _prepare_wan_modulation(self.scale_shift_table, temb))
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
