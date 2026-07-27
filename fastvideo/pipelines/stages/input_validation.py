@@ -107,8 +107,11 @@ class InputValidationStage(PipelineStage):
                 patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
                 vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
                 dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
-                max_area = max(480 * 832, batch.width * batch.height)
-                ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+                if batch.width * batch.height > 480 * 832:
+                    ow = batch.width // dw * dw
+                    oh = batch.height // dh * dh
+                else:
+                    ow, oh = best_output_size(iw, ih, dw, dh, 480 * 832)
 
                 scale = max(ow / iw, oh / ih)
                 img = img.resize((round(iw * scale), round(ih * scale)), Image.LANCZOS)
