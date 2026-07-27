@@ -182,7 +182,7 @@ class WanModel(ModelBase):
         parquet_schema = pyarrow_schema_t2v
         if preprocessed_data_type == "text_only":
             parquet_schema = pyarrow_schema_text_only
-        elif preprocessed_data_type == "i2v":
+        elif bool(getattr(training_config.pipeline_config, "ti2v_task", False)):
             parquet_schema = pyarrow_schema_i2v
         elif preprocessed_data_type != "t2v":
             raise ValueError("Unsupported Wan preprocessed_data_type: "
@@ -294,6 +294,13 @@ class WanModel(ModelBase):
 
         training_batch.latents = normalize_dit_input("wan", training_batch.latents, self.vae)
         training_batch = self._prepare_dit_inputs(training_batch, generator)
+        if bool(getattr(tc.pipeline_config, "ti2v_task", False)):
+            first_frame_latent = raw_batch["first_frame_latent"][:, :, :1].to(
+                device=device,
+                dtype=dtype,
+            )
+            assert training_batch.conditional_dict is not None
+            training_batch.conditional_dict["first_frame_latent"] = first_frame_latent
         training_batch = self._build_attention_metadata(training_batch)
 
         # Shallow copy keeps the lru_cache'd LongTensor index fields shared
@@ -610,7 +617,29 @@ class WanModel(ModelBase):
             # Teacher forcing: clean context latents (+ optional aug timestep).
             kwargs["clean_x"] = clean_x.permute(0, 2, 1, 3, 4)
             kwargs["aug_t"] = aug_t
+        first_frame_latent = text_dict.get("first_frame_latent")
+        if first_frame_latent is not None:
+            hidden_states = kwargs["hidden_states"].clone()
+            hidden_states[:, :, :1] = first_frame_latent
+            kwargs["hidden_states"] = hidden_states
+            kwargs["timestep"] = self._expand_ti2v_timesteps(
+                timestep,
+                hidden_states,
+            )
         return kwargs
+
+    def _expand_ti2v_timesteps(
+        self,
+        timestep: torch.Tensor,
+        hidden_states: torch.Tensor,
+    ) -> torch.Tensor:
+        _, _, num_frames, height, width = hidden_states.shape
+        patch_t, patch_h, patch_w = self.transformer.patch_size
+        spatial_tokens = (height // patch_h) * (width // patch_w)
+        sequence_tokens = (num_frames // patch_t) * spatial_tokens
+        timestep = timestep[:, None].expand(-1, sequence_tokens).clone()
+        timestep[:, :spatial_tokens] = 0
+        return timestep
 
     def _get_transformer(self, timestep: torch.Tensor) -> torch.nn.Module:
         return self.transformer

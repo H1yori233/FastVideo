@@ -5,5 +5,3 @@ from fastvideo.train.models.wan.wan import (
     WanModel as WanModel, )
 from fastvideo.train.models.wan.wan_causal import (
     WanCausalModel as WanCausalModel, )
-from fastvideo.train.models.wan.wan_ti2v import (
-    WanTI2VModel as WanTI2VModel, )

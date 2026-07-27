@@ -17,35 +17,8 @@ from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
 
-_WAN_TI2V_DEFAULT_MAX_AREA = 480 * 832
-
 # Alias for convenience
 V = StageValidators
-
-
-def _wan_ti2v_output_size(
-    input_width: int,
-    input_height: int,
-    width_multiple: int,
-    height_multiple: int,
-    requested_width: int,
-    requested_height: int,
-) -> tuple[int, int]:
-    """Resolve Wan TI2V size and align explicit high-resolution requests."""
-    requested_area = requested_width * requested_height
-    if requested_area > _WAN_TI2V_DEFAULT_MAX_AREA:
-        return (
-            requested_width // width_multiple * width_multiple,
-            requested_height // height_multiple * height_multiple,
-        )
-
-    return best_output_size(
-        input_width,
-        input_height,
-        width_multiple,
-        height_multiple,
-        _WAN_TI2V_DEFAULT_MAX_AREA,
-    )
 
 
 class InputValidationStage(PipelineStage):
@@ -134,23 +107,8 @@ class InputValidationStage(PipelineStage):
                 patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
                 vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
                 dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
-                logger.info(
-                    "Wan TI2V image request: source=%sx%s requested=%sx%s alignment=%sx%s",
-                    iw,
-                    ih,
-                    batch.width,
-                    batch.height,
-                    dw,
-                    dh,
-                )
-                ow, oh = _wan_ti2v_output_size(
-                    iw,
-                    ih,
-                    dw,
-                    dh,
-                    batch.width,
-                    batch.height,
-                )
+                max_area = max(480 * 832, batch.width * batch.height)
+                ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 
                 scale = max(ow / iw, oh / ih)
                 img = img.resize((round(iw * scale), round(ih * scale)), Image.LANCZOS)

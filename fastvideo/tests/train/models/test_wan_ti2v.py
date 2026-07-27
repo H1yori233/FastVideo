@@ -4,27 +4,28 @@ from types import SimpleNamespace
 
 import torch
 
-from fastvideo.train.models.wan.wan_ti2v import WanTI2VModel
+from fastvideo.train.models.wan.wan import WanModel
 
 
 def test_ti2v_accepts_single_frame_conditioning_latent() -> None:
-    model = object.__new__(WanTI2VModel)
+    model = object.__new__(WanModel)
     object.__setattr__(model, "transformer", SimpleNamespace(patch_size=(1, 2, 2)))
-    object.__setattr__(
-        model,
-        "training_config",
-        SimpleNamespace(pipeline_config=SimpleNamespace(expand_timesteps=True)),
-    )
 
     hidden_states = torch.randn(2, 16, 9, 4, 6)
     first_frame_latent = torch.randn(2, 16, 1, 4, 6)
     timestep = torch.tensor([500.0, 750.0])
 
-    conditioned, expanded_timestep = model._apply_first_frame_latent(
-        hidden_states,
+    kwargs = model._build_distill_input_kwargs(
+        hidden_states.permute(0, 2, 1, 3, 4),
         timestep,
-        first_frame_latent,
+        {
+            "encoder_hidden_states": torch.empty(2, 1, 1),
+            "encoder_attention_mask": torch.empty(2, 1),
+            "first_frame_latent": first_frame_latent,
+        },
     )
+    conditioned = kwargs["hidden_states"]
+    expanded_timestep = kwargs["timestep"]
 
     assert torch.equal(conditioned[:, :, :1], first_frame_latent)
     assert torch.equal(conditioned[:, :, 1:], hidden_states[:, :, 1:])

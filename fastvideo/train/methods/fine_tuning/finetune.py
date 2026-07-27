@@ -92,14 +92,8 @@ class FineTuneMethod(TrainingMethod):
             attn_kind=self._attn_kind,
         )
 
-        if training_batch.first_frame_conditioning:
-            if pred.shape[1] <= 1:
-                raise ValueError("first_frame_conditioning requires at least 2 latent frames; "
-                                 "the only latent frame would otherwise be an unsupervised condition")
-            # The clean first-frame latent replaces its noised counterpart in
-            # the DiT input and receives timestep 0, so its sampled-noise flow
-            # target is not learnable. Keep the MSE normalized over generated
-            # frames only.
+        if bool(getattr(self.training_config.pipeline_config, "ti2v_task", False)):
+            # Frame 0 is a clean condition at timestep 0, not a denoising target.
             pred = pred[:, 1:]
             noisy_latents = noisy_latents[:, 1:]
             clean_latents = clean_latents[:, 1:]

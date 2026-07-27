@@ -105,7 +105,6 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
         },
         "data": {
             "data_path": "/some/path",
-            "preprocessed_data_type": "i2v",
             "train_batch_size": 2,
             "dataloader_num_workers": 4,
             "training_cfg_rate": 0.1,
@@ -157,7 +156,6 @@ def test_full_yaml_populates_all_training_fields(tmp_path: Path) -> None:
 
     assert t.data.train_batch_size == 2
     assert t.data.data_path == "/some/path"
-    assert t.data.preprocessed_data_type == "i2v"
     assert t.data.num_frames == 33
     assert t.data.seed == 42
 
