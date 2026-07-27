@@ -384,6 +384,6 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         # size. Persist the final partial buffer instead of silently dropping
         # those samples when the dataloader is exhausted.
         if hasattr(self, "dataset_writer"):
-            written = self.dataset_writer.flush()
+            written = self.dataset_writer.flush(write_remainder=True)
             if written:
                 logger.info("Flushed final %s samples to parquet", written)
