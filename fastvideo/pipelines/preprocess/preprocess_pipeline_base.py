@@ -379,3 +379,11 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 written = self.dataset_writer.flush()
                 logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0
+
+        # ``flush_frequency`` is not necessarily a divisor of the dataset
+        # size. Persist the final partial buffer instead of silently dropping
+        # those samples when the dataloader is exhausted.
+        if hasattr(self, "dataset_writer"):
+            written = self.dataset_writer.flush()
+            if written:
+                logger.info("Flushed final %s samples to parquet", written)
