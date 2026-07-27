@@ -39,7 +39,6 @@ class ComposedPipelineBase(ABC):
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
-    _optional_config_modules: list[str] = []
     _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
@@ -405,8 +404,6 @@ class ComposedPipelineBase(ABC):
 
         # all the component models used by the pipeline
         required_modules = self.required_config_modules
-        modules_to_load = set(required_modules)
-        modules_to_load.update(self._optional_config_modules)
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
@@ -431,7 +428,7 @@ class ComposedPipelineBase(ABC):
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
                 continue
-            if module_name not in modules_to_load:
+            if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
                 continue
             if loaded_modules is not None and module_name in loaded_modules:
