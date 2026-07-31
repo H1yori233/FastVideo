@@ -142,3 +142,88 @@ def prope_dot_product_attention(
     if output.shape != query.shape:
         raise RuntimeError(f"PRoPE attention returned shape {output.shape}, expected {query.shape}.")
     return output
+
+
+def prope_dot_product_attention_by_frame_indices(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *,
+    viewmats: Sequence[torch.Tensor],
+    query_frame_indices: Sequence[int],
+    key_value_frame_indices: Sequence[int],
+    camera_layout: str = _FULL_CAMERA_LAYOUT,
+    scale: float | None = None,
+    **kwargs,
+) -> torch.Tensor:
+    """Apply PRoPE when query and key/value use different camera frames."""
+    if camera_layout != _FULL_CAMERA_LAYOUT:
+        raise ValueError(
+            "Matrix-Game 3.5 supports only camera_layout='full', "
+            f"got {camera_layout!r}."
+        )
+    if len(viewmats) != 3:
+        raise ValueError("viewmats must contain exactly (projection, transpose, inverse).")
+    projection, transpose, inverse = viewmats
+    if transpose.shape != projection.shape or inverse.shape != projection.shape:
+        raise ValueError("projection, transpose, and inverse matrix shapes must match.")
+    if projection.ndim != 5 or projection.shape[-3:] != (4, 4, 4):
+        raise ValueError(
+            "projection matrices must have shape [batch, camera_frames, 4, 4, 4], "
+            f"got {projection.shape}."
+        )
+    if query.ndim != 4 or key.ndim != 4 or value.ndim != 4:
+        raise ValueError("query, key, and value must have shape [batch, heads, sequence, head_dim].")
+    if key.shape != value.shape:
+        raise ValueError(f"key and value shapes must match, got {key.shape} and {value.shape}.")
+    if query.shape[:2] != key.shape[:2] or query.shape[-1] != key.shape[-1]:
+        raise ValueError("query and key must have matching batch, head, and head_dim dimensions.")
+    if query.shape[-1] == 0 or query.shape[-1] % _PROJECTION_BLOCK_SIZE != 0:
+        raise ValueError(
+            f"head_dim must be a positive multiple of {_PROJECTION_BLOCK_SIZE}, got {query.shape[-1]}."
+        )
+
+    query_indices = torch.as_tensor(
+        query_frame_indices,
+        device=projection.device,
+        dtype=torch.long,
+    ).reshape(-1)
+    key_value_indices = torch.as_tensor(
+        key_value_frame_indices,
+        device=projection.device,
+        dtype=torch.long,
+    ).reshape(-1)
+    if query_indices.numel() == 0 or key_value_indices.numel() == 0:
+        raise ValueError("query and key/value frame indices must be non-empty.")
+    max_index = max(int(query_indices.max().item()), int(key_value_indices.max().item()))
+    min_index = min(int(query_indices.min().item()), int(key_value_indices.min().item()))
+    if min_index < 0 or max_index >= int(projection.shape[1]):
+        raise ValueError(
+            "PRoPE frame indices must address camera_info, got range "
+            f"[{min_index}, {max_index}] for {projection.shape[1]} camera frames."
+        )
+    if query.shape[2] % int(query_indices.numel()):
+        raise ValueError("query sequence length must be divisible by query frame count.")
+    if key.shape[2] % int(key_value_indices.numel()):
+        raise ValueError("key/value sequence length must be divisible by key/value frame count.")
+    if query.device != projection.device or query.dtype != projection.dtype:
+        raise ValueError("viewmats must match query device and dtype.")
+    if key.device != query.device or value.device != query.device:
+        raise ValueError("query, key, and value must be on the same device.")
+    if key.dtype != query.dtype or value.dtype != query.dtype:
+        raise ValueError("query, key, and value must have the same dtype.")
+
+    query_projection = projection.index_select(1, query_indices)
+    query_transpose = transpose.index_select(1, query_indices)
+    key_value_inverse = inverse.index_select(1, key_value_indices)
+    output = F.scaled_dot_product_attention(
+        _apply_tiled_projection(query, query_transpose),
+        _apply_tiled_projection(key, key_value_inverse),
+        _apply_tiled_projection(value, key_value_inverse),
+        scale=scale,
+        **kwargs,
+    )
+    output = _apply_tiled_projection(output, query_projection)
+    if output.shape != query.shape:
+        raise RuntimeError(f"PRoPE attention returned shape {output.shape}, expected {query.shape}.")
+    return output

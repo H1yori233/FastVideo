@@ -128,7 +128,11 @@ def test_matrixgame35_meta_state_surface_matches_mapped_official_keys(
         assert model.subject_ref_local_w_embedding.shape == (64, 128)
 
 
-def test_matrixgame35_cpu_strict_load_and_forward(cpu_sdpa: None) -> None:
+@pytest.mark.parametrize("per_token_camera", (False, True))
+def test_matrixgame35_cpu_strict_load_and_forward(
+    cpu_sdpa: None,
+    per_token_camera: bool,
+) -> None:
     del cpu_sdpa
     torch.manual_seed(20260731)
     model = matrixgame35.MatrixGame35Transformer3DModel(
@@ -152,6 +156,11 @@ def test_matrixgame35_cpu_strict_load_and_forward(cpu_sdpa: None) -> None:
     encoder_hidden_states = torch.randn(1, 3, 16)
     timestep = torch.linspace(0, 999, sequence_length).reshape(1, sequence_length)
     camera_info = _identity_camera_info(batch_size=1, frames=2)
+    if per_token_camera:
+        camera_info = (
+            camera_info[0],
+            tuple(matrix.repeat_interleave(4, dim=1) for matrix in camera_info[1]),
+        )
 
     with torch.inference_mode(), set_forward_context(current_timestep=0, attn_metadata=None):
         output = model(
@@ -165,7 +174,7 @@ def test_matrixgame35_cpu_strict_load_and_forward(cpu_sdpa: None) -> None:
     assert torch.isfinite(output).all()
 
 
-def test_matrixgame35_rejects_unreleased_execution_contracts(
+def test_matrixgame35_rejects_invalid_execution_contracts(
     cpu_sdpa: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -188,12 +197,20 @@ def test_matrixgame35_rejects_unreleased_execution_contracts(
     encoder_hidden_states = torch.zeros(1, 3, 16)
     camera_info = _identity_camera_info(batch_size=1, frames=2)
 
-    with pytest.raises(NotImplementedError, match="causal forward"):
+    with pytest.raises(ValueError, match="kv_caches"):
         causal_model(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,
-            timestep=torch.zeros(1, 8),
+            timestep=torch.zeros(2),
             camera_info=camera_info,
+        )
+    with pytest.raises(ValueError, match="current_positions"):
+        causal_model(
+            hidden_states=hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
+            timestep=torch.zeros(2),
+            camera_info=camera_info,
+            kv_caches=causal_model.init_causal_kv_caches(),
         )
 
     with pytest.raises(ValueError, match="one value per packed latent token"):

@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-from functools import lru_cache
-import importlib.util
 from pathlib import Path
-import sys
-from types import ModuleType, SimpleNamespace
-from typing import Any
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -18,7 +14,7 @@ from fastvideo.pipelines.basic.matrixgame35.conditioning import (
     build_subject_ref_memory_tokens,
     prepend_subject_ref_prope_camera_info,
 )
-from tests.local_tests.matrixgame35._upstream import load_upstream_transformer
+from tests.local_tests.matrixgame35._upstream import load_upstream_pipeline
 
 
 PARITY_SCOPE = "implementation_subcomponent"
@@ -26,83 +22,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OFFICIAL_DIR = _REPO_ROOT / "Matrix-Game-3.5"
 
 
-class _ImportOnlyType:
-    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-        pass
-
-
-def _install_module(name: str, **attributes: Any) -> ModuleType:
-    module = sys.modules.get(name)
-    if module is None:
-        module = ModuleType(name)
-        module.__package__ = name.rsplit(".", 1)[0]
-        sys.modules[name] = module
-    for attribute, value in attributes.items():
-        setattr(module, attribute, value)
-    return module
-
-
-def _install_namespace(name: str, path: Path) -> ModuleType:
-    module = sys.modules.get(name)
-    if module is None:
-        module = ModuleType(name)
-        module.__package__ = name
-        module.__path__ = [str(path)]
-        sys.modules[name] = module
-    return module
-
-
-@lru_cache(maxsize=1)
-def _load_upstream_pipeline() -> ModuleType:
-    source_file = _OFFICIAL_DIR / "diffsynth" / "pipelines" / "wan_video.py"
-    if not source_file.is_file():
-        pytest.skip(f"Pinned Matrix-Game 3.5 source is missing: {source_file}")
-
-    transformer_modules = load_upstream_transformer(_OFFICIAL_DIR)
-    models_name = transformer_modules.wan_video_dit.__name__.rsplit(".", 1)[0]
-    diffsynth_name = models_name.rsplit(".", 1)[0]
-
-    core = sys.modules[f"{diffsynth_name}.core"]
-    core.ModelConfig = _ImportOnlyType
-    core.gradient_checkpoint_forward = lambda *_args, **_kwargs: None
-    _install_namespace(f"{diffsynth_name}.core.device", _OFFICIAL_DIR / "diffsynth" / "core" / "device")
-    _install_module(f"{diffsynth_name}.core.device.npu_compatible_device", get_device_type=lambda: "cpu")
-    _install_module(f"{diffsynth_name}.diffusion", FlowMatchScheduler=_ImportOnlyType)
-    _install_module(
-        f"{diffsynth_name}.diffusion.base_pipeline",
-        BasePipeline=_ImportOnlyType,
-        PipelineUnit=_ImportOnlyType,
-    )
-
-    import_only_models = {
-        "wan_video_dit_s2v": {"rope_precompute": lambda *_args, **_kwargs: None},
-        "wan_video_text_encoder": {
-            "WanTextEncoder": _ImportOnlyType,
-            "HuggingfaceTokenizer": _ImportOnlyType,
-        },
-        "wan_video_vae": {"WanVideoVAE": _ImportOnlyType},
-        "wan_video_image_encoder": {"WanImageEncoder": _ImportOnlyType},
-        "wan_video_vace": {"VaceWanModel": _ImportOnlyType},
-        "wan_video_motion_controller": {"WanMotionControllerModel": _ImportOnlyType},
-        "wan_video_animate_adapter": {"WanAnimateAdapter": _ImportOnlyType},
-        "wan_video_mot": {"MotWanModel": _ImportOnlyType},
-        "wav2vec": {"WanS2VAudioEncoder": _ImportOnlyType},
-        "longcat_video_dit": {"LongCatVideoTransformer3DModel": _ImportOnlyType},
-    }
-    for module_name, attributes in import_only_models.items():
-        _install_module(f"{models_name}.{module_name}", **attributes)
-
-    _install_namespace(f"{diffsynth_name}.pipelines", _OFFICIAL_DIR / "diffsynth" / "pipelines")
-    module_name = f"{diffsynth_name}.pipelines.wan_video"
-    spec = importlib.util.spec_from_file_location(module_name, source_file)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot import pinned upstream pipeline source: {source_file}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    if Path(module.__file__).resolve() != source_file.resolve():
-        raise RuntimeError(f"Loaded unexpected upstream pipeline source: {module.__file__}")
-    return module
+def _load_upstream_pipeline():
+    if not _OFFICIAL_DIR.is_dir():
+        pytest.skip(f"Pinned Matrix-Game 3.5 source is missing: {_OFFICIAL_DIR}")
+    return load_upstream_pipeline(_OFFICIAL_DIR)
 
 
 def _complex_frequencies(rows: int, width: int, scale: float) -> torch.Tensor:
