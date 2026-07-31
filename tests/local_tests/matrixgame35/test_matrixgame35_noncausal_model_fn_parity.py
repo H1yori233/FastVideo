@@ -110,6 +110,14 @@ def test_noncausal_clean_mosaic_subject_path_matches_pinned_model_fn_drop_holes(
     upstream_model = load_upstream_transformer(_OFFICIAL_DIR).wan_video_dit
     upstream_pipeline = load_upstream_pipeline(_OFFICIAL_DIR)
 
+    # This tiny reference model runs on CPU. A CUDA environment can still make
+    # the upstream module discover flash-attn at import time, so force its exact
+    # built-in SDPA fallback instead of dispatching a CPU tensor to a CUDA-only
+    # kernel.
+    monkeypatch.setattr(upstream_model, "FLASH_ATTN_3_AVAILABLE", False)
+    monkeypatch.setattr(upstream_model, "FLASH_ATTN_2_AVAILABLE", False)
+    monkeypatch.setattr(upstream_model, "SAGE_ATTN_AVAILABLE", False)
+
     torch.manual_seed(3505)
     official = upstream_model.WanModel(
         dim=128,
