@@ -28,11 +28,11 @@ class _FakeVAE:
 
     def __init__(self):
         self.config = SimpleNamespace(latents_mean=(1.0, 2.0), latents_std=(2.0, 4.0))
-        self.last_encode = None
+        self.encode_inputs = []
         self.last_decode = None
 
     def encode(self, video):
-        self.last_encode = video.clone()
+        self.encode_inputs.append(video.clone())
         value = torch.stack((video[:, 0], video[:, 1]), dim=1)
         return _Posterior(value)
 
@@ -41,7 +41,7 @@ class _FakeVAE:
         return torch.cat((latents[:, :1], latents[:, 1:2], latents[:, :1]), dim=1)
 
 
-def test_independent_frames_stay_in_batch_dimension_and_use_posterior_mode():
+def test_independent_frames_use_sequential_single_frame_vae_calls_and_posterior_mode():
     vae = _FakeVAE()
     frames = torch.zeros(3, 3, 4, 5)
     frames[:, 0] = 5
@@ -49,7 +49,7 @@ def test_independent_frames_stay_in_batch_dimension_and_use_posterior_mode():
 
     latents = encode_matrixgame35_independent_frames(vae, frames)
 
-    assert vae.last_encode.shape == (3, 3, 1, 4, 5)
+    assert [value.shape for value in vae.encode_inputs] == [(1, 3, 1, 4, 5)] * 3
     assert latents.shape == (3, 2, 1, 4, 5)
     torch.testing.assert_close(latents[:, 0], torch.full((3, 1, 4, 5), 2.0))
     torch.testing.assert_close(latents[:, 1], torch.full((3, 1, 4, 5), 2.0))

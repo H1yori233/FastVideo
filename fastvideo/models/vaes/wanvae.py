@@ -1251,30 +1251,37 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         enc = torch.cat([first_frame, enc], dim=2)
         return enc
 
+    def decode_unclamped(self, z: torch.Tensor) -> torch.Tensor:
+        """Run the feature-cache decoder without casting or clipping its output."""
+        if not self.use_feature_cache:
+            raise RuntimeError("decode_unclamped requires use_feature_cache=True")
+
+        self.clear_cache()
+        iter_ = z.shape[2]
+        x = self.post_quant_conv(z)
+        with forward_context(feat_cache_arg=self._feat_map,
+                             feat_idx_arg=self._conv_idx,
+                             use_light_vae_arg=self.config.use_light_vae):
+            for i in range(iter_):
+                feat_idx.set(0)
+                if i == 0:
+                    first_chunk.set(True)
+                    out = self.decoder(x[:, :, i:i + 1, :, :])
+                else:
+                    first_chunk.set(False)
+                    out_ = self.decoder(x[:, :, i:i + 1, :, :])
+                    out = torch.cat([out, out_], 2)
+
+        if self.config.patch_size is not None:
+            out = unpatchify(out, patch_size=self.config.patch_size)
+
+        self.clear_cache()
+        return out
+
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         if self.use_feature_cache:
-            self.clear_cache()
-            iter_ = z.shape[2]
-            x = self.post_quant_conv(z)
-            with forward_context(feat_cache_arg=self._feat_map,
-                                 feat_idx_arg=self._conv_idx,
-                                 use_light_vae_arg=self.config.use_light_vae):
-                for i in range(iter_):
-                    feat_idx.set(0)
-                    if i == 0:
-                        first_chunk.set(True)
-                        out = self.decoder(x[:, :, i:i + 1, :, :])
-                    else:
-                        first_chunk.set(False)
-                        out_ = self.decoder(x[:, :, i:i + 1, :, :])
-                        out = torch.cat([out, out_], 2)
-
-            if self.config.patch_size is not None:
-                out = unpatchify(out, patch_size=self.config.patch_size)
-                
-            out = out.float()
+            out = self.decode_unclamped(z).float()
             out = torch.clamp(out, min=-1.0, max=1.0)
-            self.clear_cache()
         else:
             out = ParallelTiledVAE.decode(self, z)
 
