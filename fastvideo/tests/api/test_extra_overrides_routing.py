@@ -105,6 +105,20 @@ def test_forward_batch_accepts_ltx2_sampling_param_fields() -> None:
     assert batch.ltx2_video_conditions == [(["frame0.png", "frame1.png"], 2, 0.5)]
 
 
+def test_forward_batch_accepts_matrixgame35_input_fields() -> None:
+    sp = SamplingParam(
+        camera_trajectory="camera.npz",
+        camera_convention="w2c",
+        subject_ref_source="protagonist_refs",
+    )
+
+    batch = ForwardBatch(**shallow_asdict(sp))
+
+    assert batch.camera_trajectory == "camera.npz"
+    assert batch.camera_convention == "w2c"
+    assert batch.subject_ref_source == "protagonist_refs"
+
+
 def test_sampling_param_update_error_mentions_passthrough_route() -> None:
     """The error message should point future contributors at the right
     routing mechanism so they don't re-introduce silent dropping."""

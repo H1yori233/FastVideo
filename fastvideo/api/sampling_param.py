@@ -46,6 +46,8 @@ class SamplingParam:
     # Camera/action control inputs (GameCraft)
     camera_states: Any | None = None  # Plücker coordinates [B, T_video, 6, H, W]
     camera_trajectory: str | None = None
+    camera_convention: str = "c2w"
+    subject_ref_source: str | None = None
     action_list: list[str] | None = None
     action_speed_list: list[float] | None = None
     gt_latents: Any | None = None  # Ground truth latents [B, 16, T, H, W]

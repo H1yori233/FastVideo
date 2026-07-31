@@ -145,6 +145,8 @@ class ForwardBatch:
     gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
     conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
     camera_trajectory: str | None = None  # Camera trajectory file/identifier
+    camera_convention: str = "c2w"  # Matrix-Game 3.5 .npz extrinsics convention
+    subject_ref_source: str | None = None  # Optional Matrix-Game 3.5 subject-reference directory
     action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
     action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld and LingBotWorld2)

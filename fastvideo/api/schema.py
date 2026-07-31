@@ -131,6 +131,9 @@ class InputConfig:
     grid_sizes: Any | None = None
     c2ws_plucker_emb: Any | None = None
     action_path: str | None = None
+    camera_trajectory: str | None = None
+    camera_convention: Literal["c2w", "w2c"] = "c2w"
+    subject_ref_source: str | None = None
     refine_from: str | None = None
     stage1_video: Any | None = None
 
