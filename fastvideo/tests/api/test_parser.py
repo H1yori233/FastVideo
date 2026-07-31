@@ -161,6 +161,8 @@ def test_load_run_config_supports_yaml_roundtrip(tmp_path) -> None:
             "negative_prompt": None,
             "inputs": {
                 "prompt_path": None,
+                "caption_path": None,
+                "section_prompts": None,
                 "image_path": None,
                 "video_path": None,
                 "pil_image": None,

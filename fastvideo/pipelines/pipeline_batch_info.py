@@ -83,6 +83,8 @@ class ForwardBatch:
     prompt: str | list[str] | None = None
     negative_prompt: str | list[str] | None = None
     prompt_path: str | None = None
+    caption_path: str | None = None
+    section_prompts: list[str] | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None
 
@@ -147,6 +149,7 @@ class ForwardBatch:
     camera_trajectory: str | None = None  # Camera trajectory file/identifier
     camera_convention: str = "c2w"  # Matrix-Game 3.5 .npz extrinsics convention
     subject_ref_source: str | None = None  # Optional Matrix-Game 3.5 subject-reference directory
+    subject_ref_latents: torch.Tensor | None = None  # Matrix-Game 3.5 refs [R,C,1,H,W]
     action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
     action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld and LingBotWorld2)

@@ -253,6 +253,52 @@ def test_generate_single_video_metadata_only_skips_output_materialization(monkey
     assert empty_calls == [((0,), {"device": "cpu"})]
 
 
+def test_generate_single_video_accepts_caption_as_primary_text_source(tmp_path):
+    captured = {}
+    output_batch = _single_video_output_batch(_NoCpuMaterializationOutput())
+    fastvideo_args = _single_video_args()
+    generator = _single_video_generator(output_batch, fastvideo_args)
+
+    def execute_forward(batch, args):
+        captured["batch"] = batch
+        return output_batch
+
+    generator.executor.execute_forward = execute_forward
+    sampling_param = _small_sampling_param(save_video=False, return_frames=False)
+    sampling_param.caption_path = str(tmp_path / "caption.json")
+
+    result = generator._generate_single_video(
+        prompt=None,
+        sampling_param=sampling_param,
+        fastvideo_args=fastvideo_args,
+        output_path=str(tmp_path / "unused.mp4"),
+    )
+
+    assert captured["batch"].prompt is None
+    assert captured["batch"].caption_path == sampling_param.caption_path
+    assert result["prompts"] is None
+
+
+def test_generate_impl_derives_caption_only_output_name(tmp_path, monkeypatch):
+    generator = _new_runtime_video_generator()
+    captured = {}
+    sampling_param = _small_sampling_param(save_video=False, return_frames=False)
+    sampling_param.caption_path = str(tmp_path / "scene-caption.json")
+    sampling_param.output_path = str(tmp_path / "outputs")
+
+    def fake_generate_single_video(prompt, sampling_param=None, **kwargs):
+        captured.update(prompt=prompt, sampling_param=sampling_param, output_path=kwargs["output_path"])
+        return {"prompts": prompt, "video_path": None}
+
+    monkeypatch.setattr(generator, "_generate_single_video", fake_generate_single_video)
+
+    generator._generate_video_impl(prompt=None, sampling_param=sampling_param)
+
+    assert captured["prompt"] is None
+    assert captured["sampling_param"].caption_path == sampling_param.caption_path
+    assert os.path.basename(captured["output_path"]) == "scene-caption.mp4"
+
+
 def test_generate_single_video_return_frames_still_materializes_output(tmp_path):
     output = torch.ones((1, 3, 2, 16, 16), dtype=torch.float32) * 0.5
     output_batch = _single_video_output_batch(output)

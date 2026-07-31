@@ -104,6 +104,10 @@ def _infer_latent_batch_size(batch: ForwardBatch) -> int:
         latent_batch_size = len(batch.prompt)
     elif batch.prompt is not None:
         latent_batch_size = 1
+    elif batch.caption_path is not None or batch.section_prompts is not None:
+        # Matrix-Game 3.5 resolves these sources into section prompts inside
+        # input validation; they still describe one rollout, not a prompt batch.
+        latent_batch_size = 1
     elif batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
         latent_batch_size = batch.prompt_embeds[0].shape[0]
     else:
@@ -598,10 +602,20 @@ class VideoGenerator:
             logger.info("Completed batch processing. Generated %d videos successfully.", len(results))
             return results
 
-        # Single prompt generation (original behavior)
-        if prompt is None:
-            raise ValueError("Either prompt or prompt_txt must be provided")
-        output_path = self._prepare_output_path(sampling_param.output_path, prompt)
+        # Single-source generation. Matrix-Game 3.5 accepts a caption JSON or
+        # explicit per-section prompts in place of one scalar prompt.
+        has_section_source = sampling_param.caption_path is not None or sampling_param.section_prompts is not None
+        if prompt is None and not has_section_source:
+            raise ValueError("A prompt, prompt_txt, caption_path, or section_prompts must be provided")
+        if prompt is not None:
+            output_name_source = prompt
+        elif sampling_param.section_prompts:
+            output_name_source = sampling_param.section_prompts[0]
+        elif sampling_param.caption_path is not None:
+            output_name_source = os.path.splitext(os.path.basename(sampling_param.caption_path))[0]
+        else:
+            output_name_source = "output"
+        output_path = self._prepare_output_path(sampling_param.output_path, output_name_source)
         kwargs["output_path"] = output_path
         if prompt_embeds is not None:
             kwargs["prompt_embeds"] = prompt_embeds
@@ -692,7 +706,7 @@ class VideoGenerator:
 
     def _generate_single_video(
         self,
-        prompt: str,
+        prompt: str | None,
         sampling_param: SamplingParam | None = None,
         fastvideo_args: FastVideoArgs | None = None,
         **kwargs,
@@ -702,10 +716,15 @@ class VideoGenerator:
             fastvideo_args = self.fastvideo_args
 
         # Validate inputs
-        if not isinstance(prompt, str):
-            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
-        prompt = prompt.strip()
         sampling_param = deepcopy(sampling_param)
+        has_section_source = sampling_param.caption_path is not None or sampling_param.section_prompts is not None
+        if prompt is None:
+            if not has_section_source:
+                raise TypeError("`prompt` must be a string unless caption_path or section_prompts is provided")
+        elif not isinstance(prompt, str):
+            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
+        else:
+            prompt = prompt.strip()
         output_path = kwargs["output_path"]
         prompt_embeds = kwargs.get("prompt_embeds")
         sampling_param.prompt = prompt

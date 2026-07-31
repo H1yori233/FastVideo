@@ -178,6 +178,49 @@ def test_batch_cfg_typed_request_reaches_sampling_param(monkeypatch) -> None:
     assert sampling_param.batch_cfg is True
 
 
+def test_section_prompts_typed_input_reaches_sampling_param(monkeypatch) -> None:
+    """Keep Matrix-Game section prompts separate from prompt batch fan-out."""
+    monkeypatch.setattr(
+        SamplingParam,
+        "from_pretrained",
+        classmethod(lambda cls, model_path: cls()),
+    )
+    request = parse_config(
+        GenerationRequest,
+        {
+            "prompt": "fallback",
+            "inputs": {
+                "section_prompts": ["section zero", "section one"]
+            },
+        },
+    )
+
+    sampling_param = request_to_sampling_param(request, model_path="test-model")
+
+    assert request.prompt == "fallback"
+    assert sampling_param.section_prompts == ["section zero", "section one"]
+
+
+def test_caption_path_typed_input_reaches_sampling_param(monkeypatch) -> None:
+    monkeypatch.setattr(
+        SamplingParam,
+        "from_pretrained",
+        classmethod(lambda cls, model_path: cls()),
+    )
+    request = parse_config(
+        GenerationRequest,
+        {
+            "inputs": {
+                "caption_path": "/inputs/caption.json"
+            },
+        },
+    )
+
+    sampling_param = request_to_sampling_param(request, model_path="test-model")
+
+    assert sampling_param.caption_path == "/inputs/caption.json"
+
+
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------

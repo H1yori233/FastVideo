@@ -360,6 +360,21 @@ surfaces:
         sources: [fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig]
       num_frames_per_block:
         sources: [fastvideo.configs.pipelines.matrixgame2.MatrixGame2I2V480PConfig]
+      matrixgame35_da3_model_ref:
+        sources:
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseFirstPersonPipelineConfig
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseThirdPersonPipelineConfig
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35DistilledFirstPersonPipelineConfig
+      matrixgame35_height:
+        sources:
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseFirstPersonPipelineConfig
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseThirdPersonPipelineConfig
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35DistilledFirstPersonPipelineConfig
+      matrixgame35_width:
+        sources:
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseFirstPersonPipelineConfig
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseThirdPersonPipelineConfig
+          - fastvideo.configs.pipelines.matrixgame35.MatrixGame35DistilledFirstPersonPipelineConfig
       audio_channels:
         sources:
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
@@ -456,6 +471,10 @@ surfaces:
       prompt: request.prompt
       negative_prompt: request.negative_prompt
       prompt_path: request.inputs.prompt_path
+      caption_path: request.inputs.caption_path
+      section_prompts: request.inputs.section_prompts
+      camera_convention: request.inputs.camera_convention
+      subject_ref_source: request.inputs.subject_ref_source
       output_path: request.output.output_path
       output_video_name: request.output.output_video_name
       num_videos_per_prompt: request.sampling.num_videos_per_prompt

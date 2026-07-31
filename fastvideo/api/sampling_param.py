@@ -73,6 +73,8 @@ class SamplingParam:
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     max_sequence_length: int | None = None
     prompt_path: str | None = None
+    caption_path: str | None = None
+    section_prompts: list[str] | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None
 

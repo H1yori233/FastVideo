@@ -122,6 +122,8 @@ class GeneratorConfig:
 @dataclass
 class InputConfig:
     prompt_path: str | None = None
+    caption_path: str | None = None
+    section_prompts: list[str] | None = None
     image_path: str | list[str] | None = None
     video_path: str | list[str] | None = None
     pil_image: Any | None = None
