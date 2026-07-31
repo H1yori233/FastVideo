@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+import subprocess
+import sys
+from types import ModuleType
+
 import numpy as np
 import pytest
 import torch
@@ -9,11 +15,50 @@ from fastvideo.pipelines.basic.matrixgame35.camera import (
     build_prope_viewmats,
     gather_latent_subframes,
     load_camera_trajectory,
+    normalize_matrixgame35_intrinsics,
     required_camera_frames,
 )
+from tests.local_tests.matrixgame35._upstream import PINNED_OFFICIAL_REVISION
 
 
 PARITY_SCOPE = "implementation_subcomponent"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_OFFICIAL_DIR = _REPO_ROOT / "Matrix-Game-3.5"
+
+
+def _load_upstream_dataset() -> ModuleType:
+    revision = subprocess.run(
+        ["git", "-C", str(_OFFICIAL_DIR), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert revision == PINNED_OFFICIAL_REVISION
+
+    root_name = "_matrixgame35_camera_reference"
+    packages = (
+        (root_name, _OFFICIAL_DIR),
+        (f"{root_name}.diffsynth", _OFFICIAL_DIR / "diffsynth"),
+        (f"{root_name}.diffsynth.core", _OFFICIAL_DIR / "diffsynth" / "core"),
+        (f"{root_name}.diffsynth.core.data", _OFFICIAL_DIR / "diffsynth" / "core" / "data"),
+    )
+    for name, path in packages:
+        if name not in sys.modules:
+            package = ModuleType(name)
+            package.__package__ = name
+            package.__path__ = [str(path)]
+            sys.modules[name] = package
+
+    module_name = f"{root_name}.diffsynth.core.data.unified_dataset"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    source = _OFFICIAL_DIR / "diffsynth" / "core" / "data" / "unified_dataset.py"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _poses(frame_count: int) -> np.ndarray:
@@ -59,6 +104,38 @@ def test_gather_one_block_uses_21_groups_of_four_after_anchor(tmp_path) -> None:
     assert intrinsics.shape == (1, 21, 4, 3, 3)
     torch.testing.assert_close(c2w[0, 0, :, 0, 3], torch.arange(1, 5, dtype=torch.float32))
     torch.testing.assert_close(c2w[0, -1, :, 0, 3], torch.arange(81, 85, dtype=torch.float32))
+
+
+@pytest.mark.parametrize("mode", ("per_frame", "first_frame", "episode_mean"))
+def test_intrinsics_normalization_matches_pinned_dataset(mode: str) -> None:
+    if not _OFFICIAL_DIR.is_dir():
+        pytest.skip(f"Pinned Matrix-Game 3.5 source is missing: {_OFFICIAL_DIR}")
+    upstream_module = _load_upstream_dataset()
+    upstream_dataset = object.__new__(upstream_module._MosaicDatasetBase)
+    upstream_dataset.mosaic_intrinsics_mode = mode
+    intrinsics = np.array(
+        (
+            ((900.0, 12.0, 450.0), (0.0, 700.0, 350.0), (0.0, 0.0, 1.0)),
+            ((800.0, 8.0, 400.0), (0.0, 600.0, 300.0), (0.0, 0.0, 1.0)),
+            ((1000.0, 16.0, 500.0), (0.0, 800.0, 400.0), (0.0, 0.0, 1.0)),
+        ),
+        dtype=np.float64,
+    )
+
+    expected = upstream_dataset.normalize_and_scale_intrinsics(
+        intrinsics,
+        H_img=704,
+        W_img=1280,
+        temporal_mean=upstream_dataset._intrinsics_temporal_mean_enabled(),
+    )
+    actual = normalize_matrixgame35_intrinsics(
+        intrinsics,
+        image_height=704,
+        image_width=1280,
+        mode=mode,
+    )
+
+    np.testing.assert_array_equal(actual, expected)
 
 
 @pytest.mark.parametrize("translation_scale", (50.0, "logd4"))

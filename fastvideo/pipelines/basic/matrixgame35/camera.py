@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-
 RGB_FRAMES_PER_BLOCK = 84
 RGB_SUBFRAMES_PER_LATENT = 4
 
@@ -25,10 +24,8 @@ class MatrixGame35CameraTrajectory:
         if self.c2w.ndim != 3 or self.c2w.shape[-2:] != (4, 4):
             raise ValueError(f"c2w must have shape [frames, 4, 4], got {tuple(self.c2w.shape)}.")
         if self.intrinsics.shape != (self.c2w.shape[0], 3, 3):
-            raise ValueError(
-                "intrinsics must have shape [frames, 3, 3] matching c2w, "
-                f"got {tuple(self.intrinsics.shape)}."
-            )
+            raise ValueError("intrinsics must have shape [frames, 3, 3] matching c2w, "
+                             f"got {tuple(self.intrinsics.shape)}.")
         if self.c2w.shape[0] == 0:
             raise ValueError("camera trajectory must contain at least one frame.")
         if self.c2w.dtype != torch.float32 or self.intrinsics.dtype != torch.float32:
@@ -44,7 +41,7 @@ def required_camera_frames(num_blocks: int) -> int:
 
 def _intrinsics_to_matrices(intrinsics: np.ndarray, frame_count: int) -> np.ndarray:
     intrinsics = np.asarray(intrinsics, dtype=np.float32)
-    if intrinsics.shape == (4,):
+    if intrinsics.shape == (4, ):
         intrinsics = intrinsics[None]
     if intrinsics.ndim == 2 and intrinsics.shape[-1] == 4:
         matrices = np.zeros((intrinsics.shape[0], 3, 3), dtype=np.float32)
@@ -57,16 +54,13 @@ def _intrinsics_to_matrices(intrinsics: np.ndarray, frame_count: int) -> np.ndar
     elif intrinsics.shape == (3, 3):
         intrinsics = intrinsics[None]
     elif intrinsics.ndim != 3 or intrinsics.shape[-2:] != (3, 3):
-        raise ValueError(
-            "intrinsics must have shape (4,), (N,4), (3,3), or (N,3,3), "
-            f"got {intrinsics.shape}."
-        )
+        raise ValueError("intrinsics must have shape (4,), (N,4), (3,3), or (N,3,3), "
+                         f"got {intrinsics.shape}.")
     if intrinsics.shape[0] == 0:
         raise ValueError("intrinsics must contain at least one frame.")
     if intrinsics.shape[0] < frame_count:
         intrinsics = np.concatenate(
-            [intrinsics, np.repeat(intrinsics[-1:], frame_count - intrinsics.shape[0], axis=0)], axis=0
-        )
+            [intrinsics, np.repeat(intrinsics[-1:], frame_count - intrinsics.shape[0], axis=0)], axis=0)
     return intrinsics[:frame_count]
 
 
@@ -117,6 +111,46 @@ def load_camera_trajectory(
     )
 
 
+def normalize_matrixgame35_intrinsics(
+    intrinsics: np.ndarray,
+    *,
+    image_height: int,
+    image_width: int,
+    mode: str = "per_frame",
+) -> np.ndarray:
+    """Recenter pixel-space intrinsics with the released mosaic policy."""
+    intrinsics = np.asarray(intrinsics)
+    if intrinsics.ndim != 3 or intrinsics.shape[1:] != (3, 3):
+        raise ValueError(f"intrinsics must have shape [frames, 3, 3], got {intrinsics.shape}.")
+    if intrinsics.shape[0] == 0:
+        raise ValueError("intrinsics must contain at least one frame.")
+    if image_height <= 0 or image_width <= 0:
+        raise ValueError(f"image dimensions must be positive, got {image_height}x{image_width}.")
+    if mode not in ("per_frame", "first_frame", "episode_mean"):
+        raise ValueError("intrinsics mode must be 'per_frame', 'first_frame', or 'episode_mean', "
+                         f"got {mode!r}.")
+
+    processed = intrinsics.astype(np.float32, copy=True)
+    if mode == "first_frame":
+        processed = np.repeat(processed[:1], repeats=processed.shape[0], axis=0)
+
+    cx = processed[:, 0, 2]
+    cy = processed[:, 1, 2]
+    target_cx = float(image_width) * 0.5
+    target_cy = float(image_height) * 0.5
+    valid = (np.abs(cx) > 1e-6) & (np.abs(cy) > 1e-6)
+    if np.any(valid):
+        processed[valid, 0, 0] = processed[valid, 0, 0] / cx[valid] * target_cx
+        processed[valid, 1, 1] = processed[valid, 1, 1] / cy[valid] * target_cy
+        processed[valid, 0, 1] = processed[valid, 0, 1] / cx[valid] * target_cx
+        processed[valid, 0, 2] = target_cx
+        processed[valid, 1, 2] = target_cy
+
+    if mode == "episode_mean":
+        processed = np.repeat(processed.mean(axis=0, keepdims=True), repeats=processed.shape[0], axis=0)
+    return processed
+
+
 def gather_latent_subframes(
     trajectory: MatrixGame35CameraTrajectory,
     *,
@@ -131,12 +165,9 @@ def gather_latent_subframes(
     stop = first_rgb_frame + RGB_SUBFRAMES_PER_LATENT * int(latent_count)
     if stop > trajectory.c2w.shape[0]:
         raise ValueError(
-            f"camera trajectory has {trajectory.c2w.shape[0]} frames but [{first_rgb_frame}:{stop}] was requested."
-        )
+            f"camera trajectory has {trajectory.c2w.shape[0]} frames but [{first_rgb_frame}:{stop}] was requested.")
     c2w = trajectory.c2w[first_rgb_frame:stop].reshape(latent_count, RGB_SUBFRAMES_PER_LATENT, 4, 4)
-    intrinsics = trajectory.intrinsics[first_rgb_frame:stop].reshape(
-        latent_count, RGB_SUBFRAMES_PER_LATENT, 3, 3
-    )
+    intrinsics = trajectory.intrinsics[first_rgb_frame:stop].reshape(latent_count, RGB_SUBFRAMES_PER_LATENT, 3, 3)
     return c2w.unsqueeze(0), intrinsics.unsqueeze(0)
 
 
@@ -191,10 +222,8 @@ def build_prope_viewmats(
     if c2w.ndim != 5 or c2w.shape[-3:] != (RGB_SUBFRAMES_PER_LATENT, 4, 4):
         raise ValueError(f"c2w must have shape [B,T,4,4,4], got {tuple(c2w.shape)}.")
     if intrinsics.shape != c2w.shape[:-2] + (3, 3):
-        raise ValueError(
-            "intrinsics must have shape [B,T,4,3,3] matching c2w, "
-            f"got {tuple(intrinsics.shape)}."
-        )
+        raise ValueError("intrinsics must have shape [B,T,4,3,3] matching c2w, "
+                         f"got {tuple(intrinsics.shape)}.")
     if image_height <= 0 or image_width <= 0:
         raise ValueError(f"image dimensions must be positive, got {image_height}x{image_width}.")
     if c2w.dtype != torch.float32 or intrinsics.dtype != torch.float32:
@@ -203,7 +232,8 @@ def build_prope_viewmats(
     # Match upstream: invert the canonical C2W carrier before the model-dtype
     # camera unit, then perform normalization and projection composition in the
     # requested DiT dtype.
-    w2c = torch.linalg.inv(c2w.double()).float().to(dtype=dtype)
+    inverse_input = c2w.cpu() if c2w.device.type == "mps" else c2w
+    w2c = torch.linalg.inv(inverse_input.double()).float().to(device=c2w.device, dtype=dtype)
     intrinsics_model = intrinsics.to(device=w2c.device, dtype=dtype)
     w2c[..., :3, 3] = _scale_translation(w2c[..., :3, 3], translation_scale)
 
@@ -216,7 +246,6 @@ def build_prope_viewmats(
 
     projection = torch.einsum("...ij,...jk->...ik", _lift_intrinsics(normalized), w2c)
     projection_transpose = projection.transpose(-1, -2)
-    projection_inverse = torch.einsum(
-        "...ij,...jk->...ik", _invert_se3(w2c), _lift_intrinsics(_invert_intrinsics(normalized))
-    )
+    projection_inverse = torch.einsum("...ij,...jk->...ik", _invert_se3(w2c),
+                                      _lift_intrinsics(_invert_intrinsics(normalized)))
     return projection, projection_transpose, projection_inverse
