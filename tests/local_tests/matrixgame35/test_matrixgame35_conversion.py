@@ -30,6 +30,31 @@ def _tiny_contract(monkeypatch: pytest.MonkeyPatch) -> dict[str, tuple[int, ...]
     return shapes
 
 
+def _write_component_source(path: Path) -> Path:
+    modules = {
+        "_class_name": "RobotWMV0CausalPipeline",
+        "_diffusers_version": "0.35.0.dev0",
+        **converter.WAN22_COMPONENT_MODULES,
+    }
+    path.mkdir(parents=True)
+    (path / "model_index.json").write_text(json.dumps(modules), encoding="utf-8")
+    for component in converter.PASSTHROUGH_COMPONENTS:
+        (path / component).mkdir()
+
+    (path / "vae" / "config.json").write_text("{}", encoding="utf-8")
+    (path / "vae" / "diffusion_pytorch_model.safetensors").write_bytes(b"vae")
+    (path / "text_encoder" / "config.json").write_text("{}", encoding="utf-8")
+    text_index = {"weight_map": {"encoder.block.0.weight": "model-00001-of-00001.safetensors"}}
+    (path / "text_encoder" / "model.safetensors.index.json").write_text(
+        json.dumps(text_index),
+        encoding="utf-8",
+    )
+    (path / "text_encoder" / "model-00001-of-00001.safetensors").write_bytes(b"text")
+    for filename in converter.COMPONENT_REQUIRED_FILES["tokenizer"]:
+        (path / "tokenizer" / filename).write_bytes(b"tokenizer")
+    return path
+
+
 def test_all_released_variant_surfaces_are_exact() -> None:
     first = converter.build_expected_official_shapes(converter.VARIANTS["base_first_person"])
     third = converter.build_expected_official_shapes(converter.VARIANTS["base_third_person"])
@@ -150,6 +175,8 @@ def test_convert_variant_preserves_bf16_and_writes_variant_config(
     assert manifest["input_key_count"] == len(shapes)
     assert manifest["output_key_count"] == len(shapes)
     assert manifest["skipped_keys"] == []
+    assert not (output / "model_index.json").exists()
+    assert not set(converter.PASSTHROUGH_COMPONENTS) & {path.name for path in output.iterdir()}
 
     with safe_open(transformer / "diffusion_pytorch_model.safetensors", framework="pt") as checkpoint:
         assert set(checkpoint.keys()) == {
@@ -220,3 +247,122 @@ def test_source_root_resolution_rejects_ambiguity(tmp_path: Path) -> None:
         path.touch()
     with pytest.raises(ValueError, match="Ambiguous base_first_person"):
         converter.resolve_source(tmp_path, spec)
+
+
+@pytest.mark.parametrize(
+    ("variant", "pipeline_class"),
+    [
+        ("base_first_person", "MatrixGame35BaseFirstPersonPipeline"),
+        ("base_third_person", "MatrixGame35BaseThirdPersonPipeline"),
+        ("distilled_first_person", "MatrixGame35DistilledFirstPersonPipeline"),
+    ],
+)
+def test_complete_root_copies_components_and_writes_variant_model_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    variant: str,
+    pipeline_class: str,
+) -> None:
+    shapes = _tiny_contract(monkeypatch)
+    source = tmp_path / f"{variant}.safetensors"
+    _write_checkpoint(source, {key: torch.zeros(shape, dtype=torch.bfloat16) for key, shape in shapes.items()})
+    component_source = _write_component_source(tmp_path / f"wan-{variant}")
+
+    output = converter.convert_variant(
+        source,
+        tmp_path / "converted",
+        converter.VARIANTS[variant],
+        component_source=component_source,
+        component_revision=converter.WAN22_COMPONENT_REVISION,
+    )
+    model_index = json.loads((output / "model_index.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output / "conversion.json").read_text(encoding="utf-8"))
+
+    assert model_index["_class_name"] == pipeline_class
+    assert set(model_index) == {
+        "_class_name",
+        "_diffusers_version",
+        "transformer",
+        "vae",
+        "text_encoder",
+        "tokenizer",
+    }
+    assert model_index["transformer"] == ["diffusers", "MatrixGame35Transformer3DModel"]
+    assert {key: model_index[key] for key in converter.PASSTHROUGH_COMPONENTS} == (
+        converter.WAN22_COMPONENT_MODULES
+    )
+    for component in converter.PASSTHROUGH_COMPONENTS:
+        assert (output / component).is_dir()
+        assert not (output / component).is_symlink()
+    assert manifest["component_source"] == {
+        "repo": converter.WAN22_COMPONENT_REPO,
+        "revision": converter.WAN22_COMPONENT_REVISION,
+        "materialization": "copy",
+    }
+
+
+def test_complete_root_can_symlink_components_for_local_development(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shapes = _tiny_contract(monkeypatch)
+    source = tmp_path / "source.safetensors"
+    _write_checkpoint(source, {key: torch.zeros(shape, dtype=torch.bfloat16) for key, shape in shapes.items()})
+    component_source = _write_component_source(tmp_path / "wan")
+
+    output = converter.convert_variant(
+        source,
+        tmp_path / "converted",
+        converter.VARIANTS["base_first_person"],
+        component_source=component_source,
+        component_revision=converter.WAN22_COMPONENT_REVISION,
+        symlink_components=True,
+    )
+
+    for component in converter.PASSTHROUGH_COMPONENTS:
+        component_path = output / component
+        assert component_path.is_symlink()
+        assert component_path.resolve() == (component_source / component).resolve()
+    manifest = json.loads((output / "conversion.json").read_text(encoding="utf-8"))
+    assert manifest["component_source"]["materialization"] == "symlink"
+
+
+def test_missing_component_is_rejected_before_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shapes = _tiny_contract(monkeypatch)
+    source = tmp_path / "source.safetensors"
+    _write_checkpoint(source, {key: torch.zeros(shape, dtype=torch.bfloat16) for key, shape in shapes.items()})
+    component_source = _write_component_source(tmp_path / "wan")
+    (component_source / "tokenizer" / "spiece.model").unlink()
+    destination = tmp_path / "converted"
+
+    with pytest.raises(FileNotFoundError, match="spiece.model"):
+        converter.convert_variant(
+            source,
+            destination,
+            converter.VARIANTS["base_first_person"],
+            component_source=component_source,
+            component_revision=converter.WAN22_COMPONENT_REVISION,
+        )
+
+    assert not destination.exists()
+
+
+def test_component_source_requires_the_pinned_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shapes = _tiny_contract(monkeypatch)
+    source = tmp_path / "source.safetensors"
+    _write_checkpoint(source, {key: torch.zeros(shape, dtype=torch.bfloat16) for key, shape in shapes.items()})
+    component_source = _write_component_source(tmp_path / "wan")
+
+    with pytest.raises(ValueError, match="component_revision must pin"):
+        converter.convert_variant(
+            source,
+            tmp_path / "converted",
+            converter.VARIANTS["base_first_person"],
+            component_source=component_source,
+        )

@@ -14,6 +14,13 @@ Examples:
         --verify-sha256
 
     python scripts/checkpoint_conversion/matrixgame35_to_diffusers.py \
+        --src official_weights/matrixgame35 \
+        --dst converted_weights/matrixgame35 \
+        --component-source official_weights/Wan2.2-TI2V-5B-Diffusers \
+        --component-revision b8fff7315c768468a5333511427288870b2e9635 \
+        --verify-sha256
+
+    python scripts/checkpoint_conversion/matrixgame35_to_diffusers.py \
         --src official_weights/matrixgame35/base/first-person.safetensors \
         --dst converted_weights/matrixgame35 \
         --variant base_first_person
@@ -55,6 +62,21 @@ SUBJECT_REF_KEYS = (
 )
 SKIP_PATTERNS: tuple[str, ...] = ()
 
+WAN22_COMPONENT_REPO = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+WAN22_COMPONENT_REVISION = "b8fff7315c768468a5333511427288870b2e9635"
+WAN22_DIFFUSERS_VERSION = "0.35.0.dev0"
+PASSTHROUGH_COMPONENTS = ("vae", "text_encoder", "tokenizer")
+WAN22_COMPONENT_MODULES: dict[str, list[str]] = {
+    "vae": ["diffusers", "AutoencoderKLWan"],
+    "text_encoder": ["transformers", "UMT5EncoderModel"],
+    "tokenizer": ["transformers", "T5TokenizerFast"],
+}
+COMPONENT_REQUIRED_FILES: dict[str, tuple[str, ...]] = {
+    "vae": ("config.json", "diffusion_pytorch_model.safetensors"),
+    "text_encoder": ("config.json", "model.safetensors.index.json"),
+    "tokenizer": ("special_tokens_map.json", "spiece.model", "tokenizer.json", "tokenizer_config.json"),
+}
+
 HIDDEN_SIZE = 3072
 FFN_DIM = 14336
 NUM_LAYERS = 30
@@ -68,6 +90,7 @@ PATCH_SIZE = (1, 2, 2)
 @dataclass(frozen=True)
 class VariantSpec:
     name: str
+    pipeline_class_name: str
     hf_repo: str
     revision: str
     published_filename: str
@@ -81,6 +104,7 @@ class VariantSpec:
 VARIANTS: dict[str, VariantSpec] = {
     "base_first_person": VariantSpec(
         name="base_first_person",
+        pipeline_class_name="MatrixGame35BaseFirstPersonPipeline",
         hf_repo="RiemannDynamics/Matrix-Game-3.5-Base",
         revision="c3b0c9c541b7754a78b5e2199e9587e003668de9",
         published_filename="first-person.safetensors",
@@ -96,6 +120,7 @@ VARIANTS: dict[str, VariantSpec] = {
     ),
     "base_third_person": VariantSpec(
         name="base_third_person",
+        pipeline_class_name="MatrixGame35BaseThirdPersonPipeline",
         hf_repo="RiemannDynamics/Matrix-Game-3.5-Base",
         revision="c3b0c9c541b7754a78b5e2199e9587e003668de9",
         published_filename="third-person.safetensors",
@@ -111,6 +136,7 @@ VARIANTS: dict[str, VariantSpec] = {
     ),
     "distilled_first_person": VariantSpec(
         name="distilled_first_person",
+        pipeline_class_name="MatrixGame35DistilledFirstPersonPipeline",
         hf_repo="RiemannDynamics/Matrix-Game-3.5-Distilled",
         revision="0b38ca0b0dda2bb994c570e183ad36d1acd53be2",
         published_filename="first-person.safetensors",
@@ -349,6 +375,85 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _read_json_object(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid JSON component file: {path}") from error
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON component file must contain an object: {path}")
+    return payload
+
+
+def validate_component_source(source: Path) -> None:
+    """Validate the pinned Wan2.2 passthrough surface before creating output."""
+
+    if not source.is_dir():
+        raise FileNotFoundError(f"Wan2.2 component source directory does not exist: {source}")
+    model_index_path = source / "model_index.json"
+    if not model_index_path.is_file():
+        raise FileNotFoundError(f"Missing pinned Wan2.2 component file: {model_index_path}")
+    model_index = _read_json_object(model_index_path)
+    expected_metadata = {"_diffusers_version": WAN22_DIFFUSERS_VERSION}
+    for key, expected in expected_metadata.items():
+        if model_index.get(key) != expected:
+            raise ValueError(
+                f"Pinned Wan2.2 model_index.json has {key}={model_index.get(key)!r}, expected {expected!r}."
+            )
+    for component, expected in WAN22_COMPONENT_MODULES.items():
+        if model_index.get(component) != expected:
+            raise ValueError(
+                f"Pinned Wan2.2 model_index.json has {component}={model_index.get(component)!r}, "
+                f"expected {expected!r}."
+            )
+
+    missing = [
+        str(source / component / filename)
+        for component, filenames in COMPONENT_REQUIRED_FILES.items()
+        for filename in filenames
+        if not (source / component / filename).is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(f"Missing pinned Wan2.2 component files: {missing}.")
+
+    _read_json_object(source / "vae" / "config.json")
+    _read_json_object(source / "text_encoder" / "config.json")
+    text_index = _read_json_object(source / "text_encoder" / "model.safetensors.index.json")
+    weight_map = text_index.get("weight_map")
+    if not isinstance(weight_map, dict) or not weight_map:
+        raise ValueError("Pinned Wan2.2 text encoder index must contain a non-empty weight_map.")
+    shard_values = list(weight_map.values())
+    if not all(isinstance(name, str) and name for name in shard_values):
+        raise ValueError("Pinned Wan2.2 text encoder index contains an invalid shard name.")
+    shard_names = set(shard_values)
+    for shard_name in shard_names:
+        shard_path = Path(shard_name)
+        if shard_path.is_absolute() or ".." in shard_path.parts:
+            raise ValueError(f"Pinned Wan2.2 text encoder index contains an unsafe shard path: {shard_name!r}.")
+        resolved = source / "text_encoder" / shard_path
+        if not resolved.is_file():
+            raise FileNotFoundError(f"Missing pinned Wan2.2 text encoder shard: {resolved}")
+
+
+def build_model_index(spec: VariantSpec) -> dict[str, object]:
+    return {
+        "_class_name": spec.pipeline_class_name,
+        "_diffusers_version": WAN22_DIFFUSERS_VERSION,
+        "transformer": ["diffusers", "MatrixGame35Transformer3DModel"],
+        **WAN22_COMPONENT_MODULES,
+    }
+
+
+def _materialize_components(source: Path, destination: Path, *, symlink: bool) -> None:
+    for component in PASSTHROUGH_COMPONENTS:
+        component_source = source / component
+        component_destination = destination / component
+        if symlink:
+            component_destination.symlink_to(component_source.resolve(), target_is_directory=True)
+        else:
+            shutil.copytree(component_source, component_destination)
+
+
 def convert_variant(
     source: Path,
     destination_root: Path,
@@ -356,10 +461,24 @@ def convert_variant(
     *,
     verify_sha256: bool = False,
     overwrite: bool = False,
+    component_source: Path | None = None,
+    component_revision: str | None = None,
+    symlink_components: bool = False,
 ) -> Path:
     """Convert one preflighted variant into an atomic transformer directory."""
 
     prefix, key_mapping = validate_source(source, spec, verify_sha256)
+    if component_source is None and component_revision is not None:
+        raise ValueError("component_revision requires component_source.")
+    if symlink_components and component_source is None:
+        raise ValueError("symlink_components requires component_source.")
+    if component_source is not None:
+        if component_revision != WAN22_COMPONENT_REVISION:
+            raise ValueError(
+                "component_revision must pin the supported Wan2.2 Diffusers snapshot "
+                f"{WAN22_COMPONENT_REVISION}, got {component_revision!r}."
+            )
+        validate_component_source(component_source)
     destination_root.mkdir(parents=True, exist_ok=True)
     final_dir = destination_root / spec.name
     if final_dir.exists() and not overwrite:
@@ -394,6 +513,10 @@ def convert_variant(
         if set(output_dtypes.values()) != {"BF16"}:
             raise AssertionError("Saved Matrix-Game 3.5 transformer did not preserve BF16.")
 
+        if component_source is not None:
+            _materialize_components(component_source, staging_dir, symlink=symlink_components)
+            _write_json(staging_dir / "model_index.json", build_model_index(spec))
+
         manifest: dict[str, object] = {
             "format_version": 1,
             "variant": spec.name,
@@ -409,6 +532,12 @@ def convert_variant(
             "output_key_count": len(converted),
             "skipped_keys": list(SKIP_PATTERNS),
         }
+        if component_source is not None:
+            manifest["component_source"] = {
+                "repo": WAN22_COMPONENT_REPO,
+                "revision": component_revision,
+                "materialization": "symlink" if symlink_components else "copy",
+            }
         _write_json(staging_dir / "conversion.json", manifest)
 
         del converted
@@ -462,7 +591,31 @@ def main() -> None:
         action="store_true",
         help="Replace an existing output variant only after the new conversion has serialized successfully.",
     )
+    parser.add_argument(
+        "--component-source",
+        type=Path,
+        help=(
+            f"Optional local materialization of {WAN22_COMPONENT_REPO}@{WAN22_COMPONENT_REVISION}; "
+            "copies vae/text_encoder/tokenizer and writes model_index.json."
+        ),
+    )
+    parser.add_argument(
+        "--component-revision",
+        help=f"Required with --component-source; must equal the pinned revision {WAN22_COMPONENT_REVISION}.",
+    )
+    parser.add_argument(
+        "--symlink-components",
+        action="store_true",
+        help="Symlink passthrough components from --component-source for local development instead of copying.",
+    )
     args = parser.parse_args()
+
+    if args.component_source is None and args.component_revision is not None:
+        parser.error("--component-revision requires --component-source.")
+    if args.component_source is not None and args.component_revision is None:
+        parser.error("--component-source requires --component-revision.")
+    if args.symlink_components and args.component_source is None:
+        parser.error("--symlink-components requires --component-source.")
 
     specs = _selected_variants(args.variant)
     if args.src.is_file() and len(specs) != 1:
@@ -478,6 +631,9 @@ def main() -> None:
             spec,
             verify_sha256=args.verify_sha256,
             overwrite=args.overwrite,
+            component_source=args.component_source,
+            component_revision=args.component_revision,
+            symlink_components=args.symlink_components,
         )
         print(f"converted {spec.name}: {source} -> {output}")
 
