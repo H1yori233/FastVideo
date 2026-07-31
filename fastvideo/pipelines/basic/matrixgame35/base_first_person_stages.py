@@ -122,6 +122,8 @@ class MatrixGame35BaseInputValidationStage(InputValidationStage):
                 or not np.isfinite(batch.guidance_scale) or batch.guidance_scale <= 0.0):
             raise ValueError("Matrix-Game 3.5 guidance_scale must be finite and positive, "
                              f"got {batch.guidance_scale}.")
+        if batch.seed is None:
+            batch.seed = BASE_SEED
         num_blocks = (batch.num_frames - 1) // RGB_FRAMES_PER_BLOCK
         if (not isinstance(batch.seed, int) or isinstance(batch.seed, bool) or batch.seed < 0 or
                 matrixgame35_base_block_seed(batch.seed, batch_index=0, block_index=num_blocks - 1) > MAX_TORCH_SEED):
@@ -473,7 +475,7 @@ class MatrixGame35BaseRolloutStage(PipelineStage):
 
             generator = torch.Generator("cpu").manual_seed(
                 matrixgame35_base_block_seed(
-                    BASE_SEED if batch.seed is None else batch.seed,
+                    int(batch.seed),
                     batch_index=0,
                     block_index=block_index,
                 ))

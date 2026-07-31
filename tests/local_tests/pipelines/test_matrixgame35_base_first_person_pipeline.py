@@ -277,6 +277,13 @@ def test_input_validation_accepts_only_released_resolution_and_frame_formula(tmp
     assert output.negative_prompt == MATRIXGAME35_NEGATIVE_PROMPT
     assert output.section_prompts == ["move forward"]
 
+    batch.seed = None
+    batch.pil_image = Image.new("RGB", (1280, 704))
+    output = MatrixGame35BaseInputValidationStage().forward(batch, _args(config))
+    assert output.seed == 3407
+    assert output.seeds == [3407]
+    assert output.generator[0].initial_seed() == 3407
+
     batch.num_frames = 84
     with pytest.raises(ValueError, match=r"1 \+ 84 \* num_blocks"):
         MatrixGame35BaseInputValidationStage().forward(batch, _args(config))
