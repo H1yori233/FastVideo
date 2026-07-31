@@ -152,6 +152,18 @@ def test_depth_shape_must_match_publication_batch() -> None:
 RUN_REAL_DA3 = os.environ.get("FASTVIDEO_MATRIXGAME35_RUN_DA3_CUDA") == "1"
 
 
+def _da3_processed_size(height: int, width: int) -> tuple[int, int]:
+    scale = DA3_PROCESS_RES / max(height, width)
+
+    def nearest_patch_multiple(size: int) -> int:
+        resized = max(1, round(size * scale))
+        lower = resized // 14 * 14
+        upper = lower + 14
+        return max(1, upper if upper - resized <= resized - lower else lower)
+
+    return nearest_patch_multiple(height), nearest_patch_multiple(width)
+
+
 @pytest.mark.skipif(
     not RUN_REAL_DA3,
     reason="set FASTVIDEO_MATRIXGAME35_RUN_DA3_CUDA=1 with DA3 model and image assets",
@@ -168,7 +180,7 @@ def test_real_depth_anything3_cuda_smoke() -> None:
 
     with Image.open(image_path) as image:
         rgb = image.convert("RGB")
-        expected_shape = (rgb.height, rgb.width)
+        expected_shape = _da3_processed_size(rgb.height, rgb.width)
         adapter = MatrixGame35DepthAnything3Adapter(
             model_ref,
             device=torch.device("cuda", torch.cuda.current_device()),
