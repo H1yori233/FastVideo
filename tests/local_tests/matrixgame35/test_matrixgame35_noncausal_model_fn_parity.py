@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tiny direct parity for the released non-causal Matrix-Game 3.5 token path."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ from tests.local_tests.matrixgame35._upstream import (
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_OFFICIAL_DIR = _REPO_ROOT / "Matrix-Game-3.5"
+_OFFICIAL_DIR = Path(os.getenv("MATRIXGAME35_OFFICIAL_REF_DIR", _REPO_ROOT / "Matrix-Game-3.5"))
 
 
 def _camera_info(frame_count: int) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
@@ -101,7 +102,7 @@ def test_arbitrary_position_rope_carrier_matches_pinned_complex_math() -> None:
     torch.testing.assert_close(actual_rotated, expected_rotated, rtol=0.0, atol=0.0)
 
 
-def test_noncausal_clean_mosaic_subject_path_matches_pinned_model_fn(
+def test_noncausal_clean_mosaic_subject_path_matches_pinned_model_fn_drop_holes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     if not _OFFICIAL_DIR.is_dir():
@@ -165,10 +166,25 @@ def test_noncausal_clean_mosaic_subject_path_matches_pinned_model_fn(
             mosaic_frame_indices=mosaic_indices,
             latent_rope_time_indices=rope_time_indices,
             mosaic_mask_holes=True,
+            mosaic_drop_holes=True,
             subject_ref_latents=subject,
             subject_ref_slot_ratio=0.5,
             subject_ref_time_gap=2,
             subject_ref_prope_mode="identity",
+            height=64,
+            width=64,
+        )
+        expected_no_subject = upstream_pipeline.model_fn_wan_video(
+            dit=official,
+            latents=noisy,
+            timestep=timestep,
+            context=context,
+            first_frame_latents=clean,
+            mosaic_latent=mosaic,
+            mosaic_frame_indices=mosaic_indices,
+            latent_rope_time_indices=rope_time_indices,
+            mosaic_mask_holes=True,
+            mosaic_drop_holes=True,
             height=64,
             width=64,
         )
@@ -181,28 +197,98 @@ def test_noncausal_clean_mosaic_subject_path_matches_pinned_model_fn(
         mosaic_frame_indices=mosaic_indices,
         latent_rope_time_indices=rope_time_indices,
         subject_ref_prefix_token_count=1,
+        drop_mosaic_holes=True,
     )
     assert layout.mosaic_hole_mask is not None
     assert int(layout.mosaic_hole_mask.sum().item()) == 1
     assert layout.latent_rope_time_indices.tolist() == [0, 7, 3, 10, 11]
 
-    with torch.inference_mode(), set_forward_context(current_timestep=500, attn_metadata=None):
-        actual_full = native(
-            hidden_states=layout.latents,
-            encoder_hidden_states=context,
-            timestep=layout.token_timesteps.unsqueeze(0),
-            camera_info=camera_info,
-            latent_layout=layout,
-            subject_ref_latents=subject,
-            subject_ref_slot_ratio=0.5,
-            subject_ref_time_gap=2,
-            subject_ref_prope_mode="identity",
-            height=64,
-            width=64,
+    block_sequence_lengths: list[int] = []
+    hook = native.blocks[0].register_forward_pre_hook(
+        lambda _module, args: block_sequence_lengths.append(int(args[0].shape[1])))
+
+    def _run_native(current_layout, current_subject=subject):
+        with torch.inference_mode(), set_forward_context(current_timestep=500, attn_metadata=None):
+            return native(
+                hidden_states=current_layout.latents,
+                encoder_hidden_states=context,
+                timestep=current_layout.token_timesteps.unsqueeze(0),
+                camera_info=camera_info,
+                latent_layout=current_layout,
+                subject_ref_latents=current_subject,
+                subject_ref_slot_ratio=0.5,
+                subject_ref_time_gap=2,
+                subject_ref_prope_mode="identity",
+                height=64,
+                width=64,
+            )
+
+    try:
+        actual_full = _run_native(layout)
+        masked_layout = build_noncausal_latent_layout(
+            noisy,
+            timestep,
+            first_frame_latents=clean,
+            mosaic_latents=mosaic,
+            mosaic_frame_indices=mosaic_indices,
+            latent_rope_time_indices=rope_time_indices,
+            subject_ref_prefix_token_count=1,
         )
+        masked_full = _run_native(masked_layout)
+
+        mosaic_without_holes = mosaic.clone()
+        mosaic_without_holes[:, :, 0, :2, :2] = 1
+        no_hole_drop_layout = build_noncausal_latent_layout(
+            noisy,
+            timestep,
+            first_frame_latents=clean,
+            mosaic_latents=mosaic_without_holes,
+            mosaic_frame_indices=mosaic_indices,
+            latent_rope_time_indices=rope_time_indices,
+            subject_ref_prefix_token_count=1,
+            drop_mosaic_holes=True,
+        )
+        no_hole_mask_layout = build_noncausal_latent_layout(
+            noisy,
+            timestep,
+            first_frame_latents=clean,
+            mosaic_latents=mosaic_without_holes,
+            mosaic_frame_indices=mosaic_indices,
+            latent_rope_time_indices=rope_time_indices,
+            subject_ref_prefix_token_count=1,
+        )
+        no_hole_drop_full = _run_native(no_hole_drop_layout)
+        no_hole_mask_full = _run_native(no_hole_mask_layout)
+        no_subject_layout = build_noncausal_latent_layout(
+            noisy,
+            timestep,
+            first_frame_latents=clean,
+            mosaic_latents=mosaic,
+            mosaic_frame_indices=mosaic_indices,
+            latent_rope_time_indices=rope_time_indices,
+            drop_mosaic_holes=True,
+        )
+        no_subject_full = _run_native(no_subject_layout, None)
+    finally:
+        hook.remove()
 
     assert actual_full.shape == layout.latents.shape
+    assert block_sequence_lengths == [20, 21, 21, 21, 19]
+    assert torch.count_nonzero(actual_full[:, :, 1, :2, :2]).item() == 0
     actual_noisy = actual_full[:, :, layout.output_frame_slice]
+    torch.testing.assert_close(
+        actual_noisy,
+        masked_full[:, :, masked_layout.output_frame_slice],
+        rtol=2e-5,
+        atol=2e-5,
+    )
+    torch.testing.assert_close(no_hole_drop_full, no_hole_mask_full, rtol=2e-5, atol=2e-5)
+    torch.testing.assert_close(
+        no_subject_full[:, :, no_subject_layout.output_frame_slice],
+        expected_no_subject,
+        rtol=2e-5,
+        atol=2e-5,
+    )
     max_abs_diff = float((actual_noisy - expected_noisy).abs().max().item())
     print(f"Matrix-Game 3.5 noncausal model_fn max_abs_diff={max_abs_diff:.8g}")
     torch.testing.assert_close(actual_noisy, expected_noisy, rtol=2e-5, atol=2e-5)

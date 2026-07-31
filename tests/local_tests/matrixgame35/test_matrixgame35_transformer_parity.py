@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Matrix-Game 3.5 base first-person transformer parity scaffold.
+"""Matrix-Game 3.5 base transformer parity scaffold.
 
-Coverage scope: both. The official side strict-loads the released
-``first-person.safetensors`` into the pinned upstream ``WanModel`` with Warped
-PRoPE enabled in every block. The FastVideo side loads the converted transformer
-through ``TransformerLoader`` into ``MatrixGame35Transformer3DModel``.
+Coverage scope: both. For each released base checkpoint, the official side
+strict-loads the pinned safetensors into upstream ``WanModel`` with Warped PRoPE
+enabled in every block. The FastVideo side loads the matching converted
+transformer through ``TransformerLoader`` into
+``MatrixGame35Transformer3DModel``.
 
 The real-weight CUDA path is intentionally sequential so the two roughly 10 GB
 BF16 models do not coexist on a 40 GB GPU. A scaffold skip is not parity
@@ -14,11 +15,14 @@ evidence; activation requires a non-skip pass with the pinned checkpoint.
 from __future__ import annotations
 
 import gc
+import hashlib
 import importlib
 import json
 import os
-from pathlib import Path
 import sys
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -45,8 +49,6 @@ PARITY_SCOPE = "both"
 
 OFFICIAL_HF_REPO = "RiemannDynamics/Matrix-Game-3.5-Base"
 OFFICIAL_HF_REVISION = "c3b0c9c541b7754a78b5e2199e9587e003668de9"
-OFFICIAL_WEIGHT_NAME = "first-person.safetensors"
-OFFICIAL_WEIGHT_SHA256 = "3d758de69f545c835ad115f50b75719e682a83c18acdf219e6c720c5f3da5ea8"
 OFFICIAL_COMPAT_STATE_PREFIXES = ("pipe.dit.", "dit.")
 
 OFFICIAL_REF_DIR = Path(
@@ -58,21 +60,57 @@ BASE_WEIGHTS_DIR = Path(
         REPO_ROOT / "official_weights" / "matrixgame35" / "base",
     )
 )
-OFFICIAL_WEIGHT_PATH = Path(
-    os.getenv(
-        "MATRIXGAME35_FIRST_PERSON_WEIGHTS",
-        BASE_WEIGHTS_DIR / OFFICIAL_WEIGHT_NAME,
-    )
-)
-FASTVIDEO_TRANSFORMER_DIR = Path(
-    os.getenv(
-        "MATRIXGAME35_CONVERTED_TRANSFORMER_DIR",
-        REPO_ROOT
-        / "converted_weights"
-        / "matrixgame35"
-        / "base_first_person"
-        / "transformer",
-    )
+
+
+@dataclass(frozen=True)
+class BaseVariantSpec:
+    name: str
+    official_weight_name: str
+    official_weight_sha256: str
+    subject_ref_memory_max_refs: int
+    official_weight_env: str
+    converted_transformer_env: str
+
+    @property
+    def official_weight_path(self) -> Path:
+        return Path(
+            os.getenv(
+                self.official_weight_env,
+                BASE_WEIGHTS_DIR / self.official_weight_name,
+            )
+        )
+
+    @property
+    def converted_transformer_dir(self) -> Path:
+        return Path(
+            os.getenv(
+                self.converted_transformer_env,
+                REPO_ROOT
+                / "converted_weights"
+                / "matrixgame35"
+                / self.name
+                / "transformer",
+            )
+        )
+
+
+BASE_VARIANTS = (
+    BaseVariantSpec(
+        name="base_first_person",
+        official_weight_name="first-person.safetensors",
+        official_weight_sha256="3d758de69f545c835ad115f50b75719e682a83c18acdf219e6c720c5f3da5ea8",
+        subject_ref_memory_max_refs=2,
+        official_weight_env="MATRIXGAME35_FIRST_PERSON_WEIGHTS",
+        converted_transformer_env="MATRIXGAME35_CONVERTED_TRANSFORMER_DIR",
+    ),
+    BaseVariantSpec(
+        name="base_third_person",
+        official_weight_name="third-person.safetensors",
+        official_weight_sha256="3388cf355148355ce216ce18a44bd304574f7eaa8c636fb14c4cbd0b47d777cf",
+        subject_ref_memory_max_refs=4,
+        official_weight_env="MATRIXGAME35_THIRD_PERSON_WEIGHTS",
+        converted_transformer_env="MATRIXGAME35_THIRD_PERSON_CONVERTED_TRANSFORMER_DIR",
+    ),
 )
 
 FASTVIDEO_CONFIG_MODULE = "fastvideo.configs.models.dits.matrixgame35"
@@ -101,7 +139,6 @@ OFFICIAL_MODEL_KWARGS: dict[str, Any] = {
     "prope_disable_t_rope": False,
     "prope_camera_layout": "full",
     "subject_ref_memory_enabled": True,
-    "subject_ref_memory_max_refs": 2,
 }
 
 EXPECTED_FASTVIDEO_CONFIG: dict[str, Any] = {
@@ -119,7 +156,7 @@ EXPECTED_FASTVIDEO_CONFIG: dict[str, Any] = {
     "prope_attention_interval": 1,
     "prope_camera_layout": "full",
     "prope_disable_native_rope": False,
-    "subject_ref_memory_max_refs": 2,
+    "causal": False,
 }
 
 
@@ -132,22 +169,41 @@ def _skip_if_reference_missing() -> None:
         )
 
 
-def _skip_if_official_weights_missing() -> None:
-    if not OFFICIAL_WEIGHT_PATH.is_file():
+def _skip_if_official_weights_missing(spec: BaseVariantSpec) -> None:
+    if not spec.official_weight_path.is_file():
         pytest.skip(
-            f"Official transformer weight is absent: {OFFICIAL_WEIGHT_PATH}. "
-            f"Stage {OFFICIAL_HF_REPO}@{OFFICIAL_HF_REVISION}/{OFFICIAL_WEIGHT_NAME}."
+            f"Official transformer weight is absent: {spec.official_weight_path}. "
+            f"Stage {OFFICIAL_HF_REPO}@{OFFICIAL_HF_REVISION}/{spec.official_weight_name} "
+            f"or set {spec.official_weight_env}."
         )
 
 
-def _skip_if_converted_weights_missing() -> None:
-    if not FASTVIDEO_TRANSFORMER_DIR.is_dir() or not any(
-        FASTVIDEO_TRANSFORMER_DIR.glob("*.safetensors")
+def _skip_if_converted_weights_missing(spec: BaseVariantSpec) -> None:
+    if not spec.converted_transformer_dir.is_dir() or not any(
+        spec.converted_transformer_dir.glob("*.safetensors")
     ):
         pytest.skip(
             "Converted Matrix-Game 3.5 transformer is absent; set "
-            f"MATRIXGAME35_CONVERTED_TRANSFORMER_DIR (expected {FASTVIDEO_TRANSFORMER_DIR})."
+            f"{spec.converted_transformer_env} "
+            f"(expected {spec.converted_transformer_dir})."
         )
+
+
+@lru_cache(maxsize=None)
+def _checkpoint_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as checkpoint:
+        for chunk in iter(lambda: checkpoint.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _assert_official_checkpoint_identity(spec: BaseVariantSpec) -> None:
+    actual_sha256 = _checkpoint_sha256(spec.official_weight_path)
+    assert actual_sha256 == spec.official_weight_sha256, (
+        f"Unexpected SHA-256 for {spec.name} checkpoint {spec.official_weight_path}: "
+        f"{actual_sha256}; expected {spec.official_weight_sha256}"
+    )
 
 
 def _import_fastvideo_contract_or_skip():
@@ -179,13 +235,22 @@ def _import_fastvideo_contract_or_skip():
     return config_class, model_class
 
 
-def _build_official_meta_model(modules: UpstreamTransformerModules) -> torch.nn.Module:
+def _build_official_meta_model(
+    modules: UpstreamTransformerModules,
+    spec: BaseVariantSpec,
+) -> torch.nn.Module:
     with torch.device("meta"):
-        model = modules.wan_video_dit.WanModel(**OFFICIAL_MODEL_KWARGS)
+        model = modules.wan_video_dit.WanModel(
+            **OFFICIAL_MODEL_KWARGS,
+            subject_ref_memory_max_refs=spec.subject_ref_memory_max_refs,
+        )
     assert model.use_prope is True
     assert model.seperated_timestep is True
     assert model.subject_ref_memory_enabled is True
-    assert tuple(model.subject_ref_index_embedding.shape) == (2, 3072)
+    assert tuple(model.subject_ref_index_embedding.shape) == (
+        spec.subject_ref_memory_max_refs,
+        3072,
+    )
     assert len(model.blocks) == 30
     assert all(block.use_prope and block.self_attn.use_prope for block in model.blocks)
     return model
@@ -223,10 +288,11 @@ def _checkpoint_shapes(path: Path) -> tuple[dict[str, tuple[int, ...]], set[str]
 def _load_official_model(
     modules: UpstreamTransformerModules,
     device: torch.device,
+    spec: BaseVariantSpec,
 ) -> torch.nn.Module:
-    model = _build_official_meta_model(modules)
-    raw_state = safetensors_load_file(str(OFFICIAL_WEIGHT_PATH), device="cpu")
-    assert raw_state, f"Official checkpoint is empty: {OFFICIAL_WEIGHT_PATH}"
+    model = _build_official_meta_model(modules, spec)
+    raw_state = safetensors_load_file(str(spec.official_weight_path), device="cpu")
+    assert raw_state, f"Official checkpoint is empty: {spec.official_weight_path}"
     prefix = _official_state_prefix(list(raw_state))
     state = {
         (key.removeprefix(prefix) if prefix else key): tensor
@@ -261,9 +327,13 @@ def _load_official_model(
     return model
 
 
-def _load_fastvideo_model(device: torch.device) -> torch.nn.Module:
+def _load_fastvideo_model(
+    device: torch.device,
+    spec: BaseVariantSpec,
+) -> torch.nn.Module:
     config_class, model_class = _import_fastvideo_contract_or_skip()
-    config_path = FASTVIDEO_TRANSFORMER_DIR / "config.json"
+    transformer_dir = spec.converted_transformer_dir
+    config_path = transformer_dir / "config.json"
     if not config_path.is_file():
         pytest.fail(f"Converted transformer directory has no config.json: {config_path}")
     config_payload = json.loads(config_path.read_text(encoding="utf-8"))
@@ -272,13 +342,18 @@ def _load_fastvideo_model(device: torch.device) -> torch.nn.Module:
             f"Unexpected converted Matrix-Game config {key}={config_payload.get(key)!r}; "
             f"expected {expected!r}"
         )
+    assert config_payload.get("subject_ref_memory_max_refs") == spec.subject_ref_memory_max_refs, (
+        "Unexpected converted Matrix-Game subject-reference row count: "
+        f"{config_payload.get('subject_ref_memory_max_refs')!r}; "
+        f"expected {spec.subject_ref_memory_max_refs!r} for {spec.name}"
+    )
 
     from fastvideo.configs.pipelines.base import PipelineConfig
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import TransformerLoader
 
     args = FastVideoArgs(
-        model_path=str(FASTVIDEO_TRANSFORMER_DIR),
+        model_path=str(transformer_dir),
         dit_cpu_offload=False,
         dit_layerwise_offload=False,
         use_fsdp_inference=False,
@@ -287,12 +362,17 @@ def _load_fastvideo_model(device: torch.device) -> torch.nn.Module:
             dit_precision="bf16",
         ),
     )
-    model = TransformerLoader().load(str(FASTVIDEO_TRANSFORMER_DIR), args)
+    model = TransformerLoader().load(str(transformer_dir), args)
     assert isinstance(model, model_class)
-    assert args.model_paths["transformer"] == str(FASTVIDEO_TRANSFORMER_DIR)
+    assert args.model_paths["transformer"] == str(transformer_dir)
     assert not any(parameter.is_meta for parameter in model.parameters())
     assert next(model.parameters()).device == device
     assert next(model.parameters()).dtype == torch.bfloat16
+    assert model.subject_ref_memory_max_refs == spec.subject_ref_memory_max_refs
+    assert tuple(model.subject_ref_index_embedding.shape) == (
+        spec.subject_ref_memory_max_refs,
+        3072,
+    )
     return model.eval()
 
 
@@ -510,47 +590,54 @@ def test_matrixgame35_upstream_narrow_import_executes_real_prope_cpu() -> None:
     assert output.abs().max() > 0
 
 
-def test_matrixgame35_base_first_person_official_key_surface() -> None:
-    """Compare the released checkpoint header with the exact upstream model surface."""
+@pytest.mark.parametrize("spec", BASE_VARIANTS, ids=lambda spec: spec.name)
+def test_matrixgame35_base_official_key_surface(spec: BaseVariantSpec) -> None:
+    """Compare each released base header with its exact upstream model surface."""
 
     _skip_if_reference_missing()
-    _skip_if_official_weights_missing()
+    _skip_if_official_weights_missing(spec)
+    _assert_official_checkpoint_identity(spec)
     modules = load_upstream_transformer(OFFICIAL_REF_DIR)
-    model = _build_official_meta_model(modules)
+    model = _build_official_meta_model(modules, spec)
     expected_shapes = {
         key: tuple(tensor.shape) for key, tensor in model.state_dict().items()
     }
-    checkpoint_shapes, checkpoint_dtypes = _checkpoint_shapes(OFFICIAL_WEIGHT_PATH)
+    checkpoint_shapes, checkpoint_dtypes = _checkpoint_shapes(spec.official_weight_path)
     assert checkpoint_shapes == expected_shapes
     assert checkpoint_dtypes == {"BF16"}
     assert "subject_ref_index_embedding" in checkpoint_shapes
-    assert checkpoint_shapes["subject_ref_index_embedding"] == (2, 3072)
+    assert checkpoint_shapes["subject_ref_index_embedding"] == (
+        spec.subject_ref_memory_max_refs,
+        3072,
+    )
 
 
 @pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="Real-weight Matrix-Game 3.5 transformer parity requires CUDA.",
 )
-def test_matrixgame35_base_first_person_transformer_parity() -> None:
-    """Strict-load and compare real official/FastVideo transformer outputs."""
+@pytest.mark.parametrize("spec", BASE_VARIANTS, ids=lambda spec: spec.name)
+def test_matrixgame35_base_transformer_parity(spec: BaseVariantSpec) -> None:
+    """Strict-load and compare each real official/FastVideo base transformer."""
 
     assert torch.cuda.is_bf16_supported(), "Matrix-Game 3.5 parity requires BF16-capable CUDA hardware"
     _skip_if_reference_missing()
-    _skip_if_official_weights_missing()
-    _skip_if_converted_weights_missing()
+    _skip_if_official_weights_missing(spec)
+    _assert_official_checkpoint_identity(spec)
+    _skip_if_converted_weights_missing(spec)
     _import_fastvideo_contract_or_skip()
 
     modules = load_upstream_transformer(OFFICIAL_REF_DIR)
     device = torch.device("cuda:0")
     inputs = _make_inputs(modules, device, torch.bfloat16)
 
-    official = _load_official_model(modules, device)
+    official = _load_official_model(modules, device, spec)
     official_output = _run_official(modules, official, inputs)
     del official
     gc.collect()
     torch.cuda.empty_cache()
 
-    fastvideo = _load_fastvideo_model(device)
+    fastvideo = _load_fastvideo_model(device, spec)
     fastvideo_output = _run_fastvideo(fastvideo, inputs)
     del fastvideo
     gc.collect()
@@ -566,7 +653,7 @@ def test_matrixgame35_base_first_person_transformer_parity() -> None:
         fastvideo_output.flatten(), official_output.flatten(), dim=0
     )
     print(
-        "Matrix-Game 3.5 base first-person transformer parity: "
+        f"Matrix-Game 3.5 {spec.name} transformer parity: "
         f"official_abs_mean={official_abs_mean.item():.6f} "
         f"fastvideo_abs_mean={fastvideo_abs_mean.item():.6f} "
         f"diff_max={difference.max().item():.6f} "

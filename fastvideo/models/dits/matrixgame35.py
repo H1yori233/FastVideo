@@ -58,6 +58,7 @@ class MatrixGame35LatentLayoutProtocol(Protocol):
     latent_rope_time_indices: torch.Tensor
     token_timesteps: torch.Tensor
     mosaic_hole_mask: torch.Tensor | None
+    drop_mosaic_holes: bool
     cross_attention_keep_mask: torch.Tensor | None
     subject_ref_prefix_token_count: int
 
@@ -95,6 +96,37 @@ def _extract_viewmats(camera_info: Sequence[Any] | None) -> tuple[torch.Tensor, 
     if not all(isinstance(matrix, torch.Tensor) for matrix in viewmats):
         raise ValueError("P, P_T, and P_inv must be tensors.")
     return viewmats[0], viewmats[1], viewmats[2]
+
+
+def _select_drop_hole_viewmats(
+    viewmats: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    *,
+    keep_indices: torch.Tensor,
+    latent_keep_indices: torch.Tensor,
+    frame_count: int,
+    tokens_per_frame: int,
+    full_sequence_length: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Select the per-token PRoPE carriers retained by hole dropping."""
+
+    selected = []
+    for matrix in viewmats:
+        camera_length = int(matrix.shape[1])
+        if camera_length == full_sequence_length:
+            selected.append(matrix.index_select(1, keep_indices).contiguous())
+            continue
+        if camera_length != frame_count:
+            raise ValueError(
+                "PRoPE viewmats must be full-sequence token carriers or one carrier per latent frame, got "
+                f"{camera_length} for sequence {full_sequence_length} and {frame_count} frames."
+            )
+        token_viewmats = (
+            matrix.unsqueeze(2)
+            .expand(matrix.shape[0], frame_count, tokens_per_frame, *matrix.shape[2:])
+            .reshape(matrix.shape[0], frame_count * tokens_per_frame, *matrix.shape[2:])
+        )
+        selected.append(token_viewmats.index_select(1, latent_keep_indices).contiguous())
+    return selected[0], selected[1], selected[2]
 
 
 class MatrixGame35TransformerBlock(nn.Module):
@@ -967,25 +999,6 @@ class MatrixGame35Transformer3DModel(BaseDiT):
             )
             full_timestep = torch.cat((ref_timestep, timestep), dim=1)
 
-        self_attention_mask = None
-        if latent_layout is not None and latent_layout.mosaic_hole_mask is not None:
-            if latent_layout.mosaic_hole_mask.shape != (sequence_length,):
-                raise ValueError(
-                    "latent_layout.mosaic_hole_mask must have one value per latent token, got "
-                    f"{tuple(latent_layout.mosaic_hole_mask.shape)} for {sequence_length}."
-                )
-            hole_mask = latent_layout.mosaic_hole_mask.to(device=hidden_states.device, dtype=torch.bool)
-            if subject_ref_token_count:
-                hole_mask = torch.cat(
-                    (
-                        torch.zeros(subject_ref_token_count, device=hidden_states.device, dtype=torch.bool),
-                        hole_mask,
-                    )
-                )
-            hidden_states = hidden_states.masked_fill(hole_mask.view(1, -1, 1), 0)
-            rope_frequencies = rope_frequencies.masked_fill(hole_mask.view(-1, 1, 1), 0)
-            self_attention_mask = (~hole_mask).view(1, 1, 1, -1)
-
         cross_attention_keep_mask = None
         if latent_layout is not None and (
             latent_layout.mosaic_frame_count > 0 or subject_ref_token_count > 0
@@ -1015,6 +1028,46 @@ class MatrixGame35Transformer3DModel(BaseDiT):
                 tokens_per_frame=grid_height * grid_width,
                 device=hidden_states.device,
             )
+
+        self_attention_mask = None
+        latent_keep_indices = None
+        if latent_layout is not None and latent_layout.mosaic_hole_mask is not None:
+            if latent_layout.mosaic_hole_mask.shape != (sequence_length,):
+                raise ValueError(
+                    "latent_layout.mosaic_hole_mask must have one value per latent token, got "
+                    f"{tuple(latent_layout.mosaic_hole_mask.shape)} for {sequence_length}."
+                )
+            latent_hole_mask = latent_layout.mosaic_hole_mask.to(device=hidden_states.device, dtype=torch.bool)
+            hole_mask = latent_hole_mask
+            if subject_ref_token_count:
+                hole_mask = torch.cat(
+                    (
+                        torch.zeros(subject_ref_token_count, device=hidden_states.device, dtype=torch.bool),
+                        hole_mask,
+                    )
+                )
+            if latent_layout.drop_mosaic_holes:
+                keep_indices = torch.nonzero(~hole_mask, as_tuple=False).squeeze(-1)
+                latent_keep_indices = torch.nonzero(~latent_hole_mask, as_tuple=False).squeeze(-1)
+                full_sequence_length = sequence_length + subject_ref_token_count
+                hidden_states = hidden_states.index_select(1, keep_indices)
+                rope_frequencies = rope_frequencies.index_select(0, keep_indices)
+                full_timestep = full_timestep.index_select(1, keep_indices)
+                viewmats = _select_drop_hole_viewmats(
+                    viewmats,
+                    keep_indices=keep_indices,
+                    latent_keep_indices=latent_keep_indices,
+                    frame_count=grid_frames,
+                    tokens_per_frame=grid_height * grid_width,
+                    full_sequence_length=full_sequence_length,
+                )
+                if cross_attention_keep_mask is not None:
+                    cross_attention_keep_mask = cross_attention_keep_mask.index_select(0, keep_indices)
+            else:
+                hidden_states = hidden_states.masked_fill(hole_mask.view(1, -1, 1), 0)
+                rope_frequencies = rope_frequencies.masked_fill(hole_mask.view(-1, 1, 1), 0)
+                self_attention_mask = (~hole_mask).view(1, 1, 1, -1)
+
         if cross_attention_keep_mask is not None:
             cross_attention_keep_mask = cross_attention_keep_mask.to(
                 device=hidden_states.device,
@@ -1026,7 +1079,7 @@ class MatrixGame35Transformer3DModel(BaseDiT):
                     f"{tuple(cross_attention_keep_mask.shape)} for {hidden_states.shape[1]}."
                 )
 
-        full_sequence_length = sequence_length + subject_ref_token_count
+        full_sequence_length = hidden_states.shape[1]
         temb = self.condition_embedder.time_embedder(full_timestep.flatten())
         temb = temb.unflatten(0, (batch_size, full_sequence_length))
         timestep_proj = self.condition_embedder.time_modulation(temb)
@@ -1059,6 +1112,10 @@ class MatrixGame35Transformer3DModel(BaseDiT):
         ).chunk(2, dim=2)
         hidden_states = self.norm_out(hidden_states, shift.squeeze(2), scale.squeeze(2))
         hidden_states = self.proj_out(hidden_states)
+        if latent_keep_indices is not None:
+            full_hidden_states = hidden_states.new_zeros(batch_size, sequence_length, hidden_states.shape[2])
+            full_hidden_states.index_copy_(1, latent_keep_indices, hidden_states)
+            hidden_states = full_hidden_states
         p_t, p_h, p_w = self.patch_size
         hidden_states = hidden_states.reshape(
             batch_size,

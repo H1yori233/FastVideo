@@ -28,6 +28,7 @@ class MatrixGame35LatentLayout:
     latent_rope_time_indices: torch.Tensor
     token_timesteps: torch.Tensor
     mosaic_hole_mask: torch.Tensor | None
+    drop_mosaic_holes: bool
     cross_attention_keep_mask: torch.Tensor | None
     tokens_per_frame: int
     subject_ref_prefix_token_count: int
@@ -136,6 +137,7 @@ def build_noncausal_latent_layout(
     latent_rope_time_indices: torch.Tensor | Sequence[int] | None = None,
     subject_ref_prefix_token_count: int = 0,
     mask_mosaic_holes: bool = True,
+    drop_mosaic_holes: bool = False,
     sequence_parallel_size: int = 1,
 ) -> MatrixGame35LatentLayout:
     """Prepare the released non-causal Matrix-Game 3.5 sequence contract.
@@ -143,7 +145,8 @@ def build_noncausal_latent_layout(
     Latents are ordered as ``clean prefix + mosaic + noisy``. Clean and mosaic
     tokens receive timestep zero, noisy tokens receive ``timestep``. Matching
     upstream inference, all-zero mosaic patches are marked as holes and receive
-    timestep 1000; callers use the returned mask for attention masking.
+    timestep 1000. Released Base inference physically drops those tokens inside
+    the transformer when ``drop_mosaic_holes`` is enabled.
     """
     if sequence_parallel_size != 1:
         raise ValueError("Matrix-Game 3.5 latent layout currently supports sequence_parallel_size=1 only.")
@@ -229,6 +232,7 @@ def build_noncausal_latent_layout(
         latent_rope_time_indices=rope_time_indices,
         token_timesteps=token_timesteps,
         mosaic_hole_mask=mosaic_hole_mask,
+        drop_mosaic_holes=bool(drop_mosaic_holes),
         cross_attention_keep_mask=cross_attention_keep_mask,
         tokens_per_frame=tokens_per_frame,
         subject_ref_prefix_token_count=subject_ref_prefix_token_count,
