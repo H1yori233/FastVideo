@@ -11,7 +11,7 @@ from PIL import Image
 import torch
 
 DA3_MODEL_ID = "depth-anything/DA3NESTED-GIANT-LARGE-1.1"
-DA3_PROCESS_RES = 700
+DA3_PROCESS_RES = 504
 
 
 def _load_depth_anything3(model_ref: str) -> Any:

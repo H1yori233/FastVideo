@@ -11,11 +11,17 @@ import numpy as np
 from PIL import Image
 import pytest
 import torch
+import yaml
 
 from fastvideo.pipelines.basic.matrixgame35._depth_anything3 import (
     DA3_PROCESS_RES,
     MatrixGame35DepthAnything3Adapter,
 )
+from tests.local_tests.matrixgame35._upstream import PINNED_OFFICIAL_REVISION
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+OFFICIAL_REF_DIR = Path(os.getenv("MATRIXGAME35_OFFICIAL_REF_DIR", REPO_ROOT / "Matrix-Game-3.5"))
 
 
 class _FakeDepthEstimator:
@@ -37,6 +43,18 @@ class _FakeDepthEstimator:
         assert not torch.is_autocast_enabled("cpu")
         self.calls.append((frames, kwargs))
         return SimpleNamespace(depth=self.depth)
+
+
+@pytest.mark.parametrize("config_name", ("infer_first_person.yaml", "infer_third_person.yaml"))
+def test_base_da3_resolution_matches_pinned_release(config_name: str) -> None:
+    config_path = OFFICIAL_REF_DIR / "configs" / config_name
+    if not config_path.is_file():
+        pytest.skip(
+            "Pinned Matrix-Game 3.5 configs are absent; set "
+            f"MATRIXGAME35_OFFICIAL_REF_DIR to commit {PINNED_OFFICIAL_REVISION}."
+        )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["vggt_omega_da3_process_res"] == DA3_PROCESS_RES == 504
 
 
 def test_publication_batch_is_one_depth_only_da3_call() -> None:
@@ -65,6 +83,7 @@ def test_publication_batch_is_one_depth_only_da3_call() -> None:
     called_frames, called_kwargs = estimator.calls[0]
     assert len(called_frames) == 84
     assert all(isinstance(frame, Image.Image) and frame.mode == "RGB" for frame in called_frames)
+    assert DA3_PROCESS_RES == 504
     assert called_kwargs == {"use_ray_pose": False, "process_res": DA3_PROCESS_RES}
     assert depths.shape == (84, 2, 4)
     assert depths.dtype == np.float32
