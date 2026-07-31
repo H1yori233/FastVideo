@@ -485,6 +485,7 @@ def convert_variant(
         raise FileExistsError(f"Refusing to overwrite existing converted variant: {final_dir}")
 
     staging_dir = Path(tempfile.mkdtemp(prefix=f".{spec.name}-", dir=destination_root))
+    backup_dir: Path | None = None
     try:
         transformer_dir = staging_dir / "transformer"
         transformer_dir.mkdir()
@@ -543,11 +544,17 @@ def convert_variant(
         del converted
         del raw_state
         if final_dir.exists():
-            shutil.rmtree(final_dir)
+            backup_dir = Path(tempfile.mkdtemp(prefix=f".{spec.name}-backup-", dir=destination_root))
+            backup_dir.rmdir()
+            os.replace(final_dir, backup_dir)
         os.replace(staging_dir, final_dir)
     except BaseException:
+        if backup_dir is not None and backup_dir.exists() and not final_dir.exists():
+            os.replace(backup_dir, final_dir)
         shutil.rmtree(staging_dir, ignore_errors=True)
         raise
+    if backup_dir is not None:
+        shutil.rmtree(backup_dir)
     return final_dir
 
 

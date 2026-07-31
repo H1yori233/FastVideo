@@ -202,6 +202,34 @@ def test_convert_variant_refuses_overwrite(tmp_path: Path, monkeypatch: pytest.M
     assert config["subject_ref_memory_max_refs"] == 0
 
 
+def test_convert_variant_restores_previous_output_when_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shapes = _tiny_contract(monkeypatch)
+    source = tmp_path / "source.safetensors"
+    _write_checkpoint(source, {key: torch.zeros(shape, dtype=torch.bfloat16) for key, shape in shapes.items()})
+    spec = converter.VARIANTS["distilled_first_person"]
+    output = converter.convert_variant(source, tmp_path / "converted", spec)
+    marker = output / "previous-output"
+    marker.write_text("keep", encoding="utf-8")
+    real_replace = converter.os.replace
+
+    def fail_new_output_publish(source_path, destination_path) -> None:
+        source_name = Path(source_path).name
+        if (source_name.startswith(f".{spec.name}-") and "-backup-" not in source_name
+                and Path(destination_path) == output):
+            raise OSError("simulated publish failure")
+        real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(converter.os, "replace", fail_new_output_publish)
+    with pytest.raises(OSError, match="simulated publish failure"):
+        converter.convert_variant(source, tmp_path / "converted", spec, overwrite=True)
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert not list((tmp_path / "converted").glob(f".{spec.name}-*"))
+
+
 def test_source_validation_rejects_dtype_and_unmapped_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
