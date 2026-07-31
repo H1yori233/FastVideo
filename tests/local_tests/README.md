@@ -28,6 +28,7 @@ tests/local_tests/<family>/
 | GEN3C | T2V | [`gen3c/`](./gen3c/) |
 | Kandinsky-5 | T2V | [`kandinsky5/`](./kandinsky5/) |
 | LTX-2 | T2V (+ audio) | [`ltx2/`](./ltx2/) |
+| Matrix-Game 3.5 | camera-conditioned I2V | [`matrixgame35/`](./matrixgame35/) |
 | Stable Diffusion 3.5 | T2I | [`sd35/`](./sd35/) |
 | Stable Audio Open 1.0 | T2A | [`stable_audio/`](./stable_audio/) |
 | Wan2.2 | I2V | [`wan22/`](./wan22/) |

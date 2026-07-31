@@ -36,6 +36,7 @@ env
 weights/
 logs/
 /Z-Image/
+/Matrix-Game-3.5/
 official_weights/
 converted_weights/
 
