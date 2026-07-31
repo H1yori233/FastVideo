@@ -375,6 +375,10 @@ surfaces:
           - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseFirstPersonPipelineConfig
           - fastvideo.configs.pipelines.matrixgame35.MatrixGame35BaseThirdPersonPipelineConfig
           - fastvideo.configs.pipelines.matrixgame35.MatrixGame35DistilledFirstPersonPipelineConfig
+      matrixgame35_distilled_profile:
+        sources: [fastvideo.configs.pipelines.matrixgame35.MatrixGame35DistilledFirstPersonPipelineConfig]
+      matrixgame35_distilled_hiar_scales:
+        sources: [fastvideo.configs.pipelines.matrixgame35.MatrixGame35DistilledFirstPersonPipelineConfig]
       audio_channels:
         sources:
           - fastvideo.configs.pipelines.stable_audio.StableAudioT2AConfig
@@ -473,6 +477,7 @@ surfaces:
       prompt_path: request.inputs.prompt_path
       caption_path: request.inputs.caption_path
       section_prompts: request.inputs.section_prompts
+      camera_trajectory: request.inputs.camera_trajectory
       camera_convention: request.inputs.camera_convention
       subject_ref_source: request.inputs.subject_ref_source
       output_path: request.output.output_path
@@ -515,7 +520,6 @@ surfaces:
       prompt_attention_mask: request.extensions.hyworld.prompt_attention_mask
       negative_attention_mask: request.extensions.hyworld.negative_attention_mask
       camera_states: request.extensions.hunyuangamecraft.camera_states
-      camera_trajectory: request.extensions.hunyuangamecraft.camera_trajectory
       action_list: request.extensions.hunyuangamecraft.action_list
       action_speed_list: request.extensions.hunyuangamecraft.action_speed_list
       gt_latents: request.extensions.hunyuangamecraft.gt_latents
