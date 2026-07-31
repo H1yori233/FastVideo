@@ -211,6 +211,15 @@ def test_matrixgame35_text_config_matches_official_wan_umt5() -> None:
     }
 
 
+def test_matrixgame35_text_padding_survives_model_arch_update() -> None:
+    config = make_matrixgame35_text_encoder_config()
+
+    config.update_model_arch({"d_model": config.d_model})
+
+    assert config.tokenizer_kwargs["padding"] == "max_length"
+    assert config.tokenizer_kwargs["max_length"] == 512
+
+
 @pytest.mark.parametrize(
     "prompt",
     (
