@@ -15,6 +15,10 @@ from fastvideo.pipelines.basic.matrixgame35.conditioning import (
     build_subject_ref_memory_tokens,
     prepend_subject_ref_prope_camera_info,
 )
+from fastvideo.pipelines.basic.matrixgame35.layout import (
+    MatrixGame35LatentLayout,
+    build_noncausal_latent_layout,
+)
 from fastvideo.pipelines.basic.matrixgame35.schedule import (
     MatrixGame35DistilledSchedule,
     build_distilled_schedule,
@@ -31,6 +35,8 @@ __all__ = [
     "build_mosaic_cross_attention_keep_mask",
     "build_subject_ref_memory_tokens",
     "prepend_subject_ref_prope_camera_info",
+    "MatrixGame35LatentLayout",
+    "build_noncausal_latent_layout",
     "MatrixGame35DistilledSchedule",
     "build_distilled_schedule",
     "distilled_noise_seeds",
