@@ -47,7 +47,11 @@ output latent channels, and BF16 tensors throughout.
 
 The released scope is inference-only. `standard`, `hiar-sde`, and
 `sink-anchor-context` are distilled runtime profiles, not additional checkpoint
-variants; only `standard` is part of the initial production port.
+variants. FastVideo keeps one distilled pipeline and selects these policies with
+`matrixgame35_distilled_profile`; optional `matrixgame35_distilled_hiar_scales`
+preserves the released per-step corruption control. The pinned HiAR rollout
+requires CFG=1 even though the public config dataclass retains the generic CFG=3
+default; FastVideo validates the executable rollout constraint.
 
 ### Frame-count contract
 
@@ -89,9 +93,9 @@ packages in the ephemeral Shifu job.
 
 ```text
 dependency_changes: none
-official_env_status: private_deps_need_stubs
-private_dep_stubs: planned test-only narrow importer for unused optional modules
-blocked_on: full official umbrella import currently reaches missing `modelscope` locally; targeted source modules and public metadata are available
+official_env_status: narrow pinned modules load through test-only import helpers
+private_dep_stubs: none
+blocked_on: the full official umbrella import still reaches unrelated optional packages; parity loads only the exact modules under test
 ```
 
 Depth-Anything-3 is a public optional preprocessing dependency. Production code
@@ -119,6 +123,20 @@ python ".agents/skills/add-model-01-prep/scripts/download_hf_weights.py" \
 Use the exact Wan2.2 and DA3 revisions recorded above during conversion and
 Shifu staging; upstream aliases are not pinned and must not be resolved live.
 
+When the pinned Diffusers snapshot is already staged, the shared VAE/text gates
+do not require the raw Wan files:
+
+```bash
+export MATRIXGAME35_WAN22_DIFFUSERS_DIR=/path/to/Wan2.2-TI2V-5B-Diffusers
+pytest \
+  tests/local_tests/matrixgame35/test_matrixgame35_vae_parity.py \
+  tests/local_tests/matrixgame35/test_matrixgame35_text_encoder_parity.py \
+  -v -s
+```
+
+The raw-official tests remain in the same files and continue to use
+`MATRIXGAME35_WAN22_RAW_DIR` when those original assets are available.
+
 ## Prototype And Conversion Artifacts
 
 ```text
@@ -129,7 +147,7 @@ fastvideo_key_dumps:
 conversion_script: scripts/checkpoint_conversion/matrixgame35_to_diffusers.py
 conversion_source_layout: raw_official
 converted_weights_dir: converted_weights/matrixgame35
-strict_load_status: not_run
+strict_load_status: synthetic_cpu_pass; Base real-weight formal Shifu gate ready; Distilled shared input blocked
 ```
 
 The converter must emit one shared Diffusers-style component layout with three
@@ -137,25 +155,37 @@ transformer variants, validate the published SHA-256 values, preserve BF16, and
 strict-load every variant. Wan VAE, UMT5/tokenizer, scheduler metadata, and the
 external DA3 asset are passthrough components with pinned provenance.
 
+`fastvideo/configs/pipelines/matrixgame35.py` owns the shared VAE/text helpers
+without making the family registry-reachable. The VAE helper delegates to the
+existing LucyEdit/DreamX Wan2.2 48-channel config. The text helper delegates to
+the DreamX UMT5 config and applies only Matrix-Game's official constructor and
+tokenizer deltas: gated GELU, inference-inert dropout `0.1`, whitespace cleanup,
+and fixed right-padded length `512`.
+
 ## Expected Parity Tests
 
 | Component | Official files / args | Planned test | Main concern | Status |
 |---|---|---|---|---|
-| Matrix-Game DiT / PRoPE | `diffsynth/models/wan_video_dit.py`; `diffsynth/models/prope_attention.py`; 30 layers, PRoPE every block | `tests/local_tests/matrixgame35/test_matrixgame35_transformer_parity.py` | parameter-free PRoPE, per-token timestep, frozen memory prefixes, dtype boundaries | CPU contracts pass; real-weight Shifu parity pending |
-| subject-reference tokens | `diffsynth/pipelines/wan_video.py::_build_subject_ref_memory_tokens` | `tests/local_tests/matrixgame35/test_matrixgame35_subject_ref_parity.py` | 2/4-slot variant shapes, packing, positional embeddings, masks | planned |
-| Wan2.2 VAE | official `WanVideoVAE38`; raw `Wan2.2_VAE.pth` | `tests/local_tests/matrixgame35/test_matrixgame35_vae_parity.py` | exact encode/decode and 3.8 temporal stride | planned |
-| UMT5 + tokenizer | official Wan text encoder and tokenizer | `tests/local_tests/matrixgame35/test_matrixgame35_text_encoder_parity.py` | hidden states, padding, negative prompt | planned |
+| Matrix-Game DiT / PRoPE | `diffsynth/models/wan_video_dit.py`; `diffsynth/models/prope_attention.py`; 30 layers, PRoPE every block | `tests/local_tests/matrixgame35/test_matrixgame35_transformer_parity.py`; `test_matrixgame35_noncausal_model_fn_parity.py`; `test_matrixgame35_causal_model_fn_parity.py` | arbitrary-time native RoPE, PRoPE, physical mosaic-hole drop/scatter, causal pre-RoPE K/raw-V cache, per-token timestep, frozen memory prefixes, dtype boundaries | direct pinned noncausal and causal CPU parity pass (`max_abs_diff<=1.67e-06`); real-weight Shifu parity pending |
+| subject-reference tokens | `diffsynth/pipelines/wan_video.py::_build_subject_ref_memory_tokens` | `tests/local_tests/matrixgame35/test_matrixgame35_subject_ref_parity.py`; `test_matrixgame35_noncausal_model_fn_parity.py` | 2/4-slot shapes, packing, negative-time RoPE, masks, model integration | direct-official CPU helper and integrated model parity pass |
+| Wan2.2 VAE | official `WanVideoVAE38`; raw `Wan2.2_VAE.pth`; HF Diffusers `AutoencoderKLWan` | `tests/local_tests/matrixgame35/test_matrixgame35_vae_parity.py` | encode/decode, 3.8 temporal stride, and exact 704x1280 weighted tiling | direct-official CPU config pass; independent Diffusers CUDA and release-resolution tiled gates ready for Shifu; raw-weight gate retained separately |
+| UMT5 + tokenizer | official Wan text encoder/tokenizer; HF Transformers `UMT5EncoderModel` | `tests/local_tests/matrixgame35/test_matrixgame35_text_encoder_parity.py` | hidden states, fixed padding, whitespace cleaning | direct-official CPU config/cleaning pass; independent snapshot tokenizer/UMT5 gates ready for Shifu; raw-weight gate retained separately |
 | flow schedules | base FlowMatch shift 5; distilled `[1000, 667, 333]` | `tests/local_tests/matrixgame35/test_matrixgame35_schedule_parity.py` | sigma/timestep and three-step student transition | direct-official CPU parity passes |
 | camera preparation / PRoPE | `diffsynth/pipelines/wan_video.py`; camera `.npz` contract | `tests/local_tests/matrixgame35/test_matrixgame35_camera_parity.py` | c2w/w2c, pixel intrinsics, four sub-frame cameras | CPU contract passes |
-| DA3 depth adapter | vendored official `depth_anything_3.api.DepthAnything3` | `tests/local_tests/matrixgame35/test_matrixgame35_depth_parity.py` | lazy loading, metric depth values and preprocessing | planned |
-| Patch Memory | `frustum/`; `examples/wanvideo/pipeline/mosaic/` | `tests/local_tests/matrixgame35/test_matrixgame35_memory_parity.py` | visibility, z-buffer fusion, candidate selection, no cross-block leakage | planned |
-| base first-person pipeline | `infer.py --person first` + `configs/infer_first_person.yaml` | `tests/local_tests/pipelines/test_matrixgame35_base_first_pipeline_parity.py` | 25-step 704x1280 rollout; 84 generated RGB frames/block | planned |
-| base third-person pipeline | `infer.py --person third` + optional refs | `tests/local_tests/pipelines/test_matrixgame35_base_third_pipeline_parity.py` | no-ref and 1-4-ref paths | planned |
-| distilled first-person pipeline | `infer_distilled.py`; `configs/infer_distilled.yaml` | `tests/local_tests/pipelines/test_matrixgame35_distilled_pipeline_parity.py` | causal KV cache, chunking, CFG=3, memory publication | planned |
+| DA3 depth adapter | vendored official `depth_anything_3.api.DepthAnything3` | `tests/local_tests/matrixgame35/test_matrixgame35_depth_adapter.py` | lazy loading; Base process resolution 504; Distilled 448; metric-depth output | local source/config pass; standalone pinned-interpreter CUDA gate ready on Shifu |
+| Patch Memory | `frustum/`; `examples/wanvideo/pipeline/mosaic/` | `tests/local_tests/matrixgame35/test_matrixgame35_memory_parity.py`; `test_matrixgame35_distilled_memory_parity.py` | visibility, z-buffer fusion, candidate selection, no cross-block leakage | direct pinned CPU parity passes |
+| base first-person pipeline | `infer.py --person first` + `configs/infer_first_person.yaml` | `tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py` | 25-step 704x1280 rollout; 84 generated RGB frames/block | focused fake-component control-flow pass; Base real-weight transformer gate ready on Shifu |
+| base third-person pipeline | `infer.py --person third` + optional refs | `tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py` | no-ref and 1-4-ref paths | focused fake-component control-flow pass; Base real-weight transformer gate ready on Shifu |
+| distilled first-person pipeline | `infer_distilled.py`; `configs/infer_distilled.yaml`; `distilled_config.py` | `tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py`; `tests/local_tests/matrixgame35/test_matrixgame35_distilled_profile_parity.py` | shared causal KV/cache-fill path; STANDARD CFG=3; HiAR CFG=1 with per-step rolling/dynamic-context corruption; sink C0 context | direct pinned CPU profile/helper parity and focused fake pipeline paths pass; real-weight Shifu pending |
 
 Local CPU runs may legitimately skip CUDA/weight paths, but a skip is not a
 verified pass. Final acceptance requires queue-terminal Shifu jobs and inspected
 logs/artifacts for every released variant.
+
+The current local snapshot measures `132 passed, 15 skipped` in the component
+suite and `45 passed` across the three focused pipeline files. Adding the two
+modified API files gives `201 passed, 15 skipped`; the 15 skips remain unverified
+CUDA or asset gates.
 
 ## Review Notes
 
