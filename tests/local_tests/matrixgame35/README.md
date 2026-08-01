@@ -174,18 +174,17 @@ and fixed right-padded length `512`.
 | camera preparation / PRoPE | `diffsynth/pipelines/wan_video.py`; camera `.npz` contract | `tests/local_tests/matrixgame35/test_matrixgame35_camera_parity.py` | c2w/w2c, pixel intrinsics, four sub-frame cameras | CPU contract passes |
 | DA3 depth adapter | vendored official `depth_anything_3.api.DepthAnything3` | `tests/local_tests/matrixgame35/test_matrixgame35_depth_adapter.py` | lazy loading; Base process resolution 504; Distilled 448; metric-depth output | local source/config pass; standalone pinned-interpreter CUDA gate passes with finite FP32 `[1,350,504]` depth |
 | Patch Memory | `frustum/`; `examples/wanvideo/pipeline/mosaic/` | `tests/local_tests/matrixgame35/test_matrixgame35_memory_parity.py`; `test_matrixgame35_distilled_memory_parity.py` | visibility, z-buffer fusion, candidate selection, no cross-block leakage | direct pinned CPU parity passes |
-| base first-person pipeline | `infer.py --person first` + `configs/infer_first_person.yaml` | `tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py` | 25-step 704x1280 rollout; 84 generated RGB frames/block | focused fake-component control-flow pass; Base real-weight transformer component gate passes; full video pending |
-| base third-person pipeline | `infer.py --person third` + optional refs | `tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py` | no-ref and 1-4-ref paths | focused fake-component control-flow pass; Base real-weight transformer component gate passes; full video pending |
+| base first-person pipeline | `infer.py --person first` + `configs/infer_first_person.yaml` | `tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py` | 25-step 704x1280 rollout; 84 generated RGB frames/block | focused fake-component control-flow pass; full official-case Shifu video gate passes with 505 decoded frames |
+| base third-person pipeline | `infer.py --person third` + optional refs | `tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py` | no-ref and 1-4-ref paths | focused fake-component control-flow pass; full official-case one-ref Shifu video gate passes with 505 decoded frames |
 | distilled first-person pipeline | `infer_distilled.py`; `configs/infer_distilled.yaml`; `distilled_config.py` | `tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py`; `tests/local_tests/matrixgame35/test_matrixgame35_distilled_profile_parity.py` | shared causal KV/cache-fill path; STANDARD CFG=3; HiAR CFG=1 with per-step rolling/dynamic-context corruption; sink C0 context | direct pinned CPU profile/helper parity and focused fake pipeline paths pass; real-weight Shifu pending |
 
 Local CPU runs may legitimately skip CUDA/weight paths, but a skip is not a
 verified pass. Final acceptance requires queue-terminal Shifu jobs and inspected
 logs/artifacts for every released variant.
 
-The current local snapshot measures `132 passed, 15 skipped` in the component
-suite and `45 passed` across the three focused pipeline files. Adding the two
-modified API files gives `201 passed, 15 skipped`; the 15 skips remain unverified
-CUDA or asset gates.
+The current targeted local snapshot measures `231 passed, 15 skipped` across the
+component suite, the three focused pipeline files, and the four Matrix-relevant
+API files. The 15 skips remain unverified CUDA or asset gates.
 
 ## Review Notes
 

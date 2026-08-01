@@ -31,7 +31,7 @@
 | camera preparation | generic | port/reuse_pending | `diffsynth/pipelines/wan_video.py`; `infer.py::load_camera` | c2w matrices + pixel intrinsics; w2c accepted by inversion | model-specific conditioning stage | complete | not_required | cpu_pass | none |
 | DA3 metric depth | encoder/preprocessor | lazy external reuse verified | vendored `third_party/depth-anything-3`; `depth_anything_3.api.DepthAnything3` | `depth-anything/DA3NESTED-GIANT-LARGE-1.1`; Base process resolution 504, Distilled 448 | lazy Matrix-scoped adapters without dependency-pin changes | adapter_complete | external_pinned_asset | local source/config pass; real CUDA standalone Shifu gate pass | I004 |
 | Patch Memory / frustum reprojection | generic | port minimal inference subset | `frustum/`; `examples/wanvideo/pipeline/mosaic/` | projection-IoU/pose selection and visibility-aware z-buffer fusion | shared helpers with Base and Distilled policies | complete | not_required | direct_pinned_cpu_pass | none |
-| pipeline variants | pipeline | port | `infer.py`; `infer_distilled.py`; four YAML configs | base first, base third no-ref/ref, distilled first; 84 generated RGB frames/block | `fastvideo/pipelines/basic/matrixgame35/` | local_fake_complete | transformer_converter_complete | 45 focused pipeline passes; real-weight and end-to-end Shifu pending | I003 |
+| pipeline variants | pipeline | port | `infer.py`; `infer_distilled.py`; four YAML configs | base first, base third no-ref/ref, distilled first; 84 generated RGB frames/block | `fastvideo/pipelines/basic/matrixgame35/` | local_fake_complete | transformer_converter_complete | 45 focused pipeline passes; Base first/third real-weight end-to-end Shifu pass; Distilled pending | I003 |
 
 ## Conversion State
 
@@ -57,7 +57,7 @@
 | base first pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py -q` | included in `45 passed` pipeline suite | fake components; one- and two-block control flow, CFG/no-CFG, memory, offload, and exact inputs |
 | base third pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py -q` | included in `45 passed` pipeline suite | fake components; no-ref/direct-latent and 1-4 image-reference paths |
 | distilled pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py -q` | `14 passed` | fake components; all three profiles, cache eviction, memory publication, and two-section prompt switching |
-| combined local | `pytest tests/local_tests/matrixgame35 tests/local_tests/pipelines/test_matrixgame35_*_pipeline.py fastvideo/tests/api/test_parser.py fastvideo/tests/api/test_compat_translation.py -q -rs` | `201 passed, 15 skipped` | Matrix contracts plus API; no skipped path counted as verified |
+| combined local | `pytest tests/local_tests/matrixgame35 tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py fastvideo/tests/api/test_parser.py fastvideo/tests/api/test_compat_translation.py fastvideo/tests/api/test_extra_overrides_routing.py fastvideo/tests/api/test_schema_parity_inventory.py -q -rs` | `231 passed, 15 skipped` | Matrix contracts plus API; no skipped path counted as verified |
 
 ## Formal Shifu Gates
 
@@ -66,6 +66,8 @@
 | Base first/third transformer + conversion | `job-20260731T212317Z-4cff5822d8` | `5 passed, 0 skipped`; normalized mean error `0.023708` first and `0.021351` third; both `829 -> 829` receipts | real published Base weights; component parity, not end-to-end video |
 | Wan tokenizer, UMT5, VAE, and 704x1280 tiling | `job-20260731T212657Z-cc3cb80905` | `4 passed, 0 skipped`; UMT5 and ordinary VAE exact; tiled encode mean diff `0.003793`, decode mean diff `0.000348` | pinned Diffusers component snapshot |
 | DA3 CUDA adapter | `job-20260731T213235Z-c0ded536e6` | `1 passed, 0 skipped`; finite contiguous FP32 depth `[1,350,504]` | exact adapter-file import under pinned Matrix interpreter, not full FastVideo package import |
+| Base first-person full pipeline | `job-20260731T224631Z-74a64bbdfb` | `1 passed, 0 skipped`; 505 decoded frames at 704x1280 and 16 FPS; MP4 SHA-256 `7fc405cbdcc49037bfb6d8328c1cc407789cd35e03d75fd33fdcc5b29996dc4` | official case 0, 25 steps, CFG 5, seed 3407; sampled seven-frame visual QA, not exhaustive temporal quality parity |
+| Base third-person full pipeline | `job-20260731T233704Z-215ce82a18` | `1 passed, 0 skipped`; 505 decoded frames at 704x1280 and 16 FPS; MP4 SHA-256 `16f686d2d17bd9d71a84ccdec6e52349e1ac5fa446455d4e1e133a75bf995d4b` | official case 0 with one reference, 25 steps, CFG 5, seed 3407; sampled seven-frame visual QA, not exhaustive temporal quality parity |
 
 ## Open Questions
 
@@ -84,6 +86,7 @@
 | I002 | prep | Shifu | medium | queue authentication/capacity initially unavailable | discovery job `job-20260731T201020Z-8d6ec0ca39` reached terminal success and identified immutable inputs | orchestrator | resolved | formal Base, shared Wan, and DA3 jobs reached terminal success with non-skip JUnit evidence |
 | I003 | parity | Distilled weights | high | no immutable Distilled shared input exists and public queue tooling cannot legally materialize an inference-model input | expected content key `385c312df55b0e004c9f18d3ea21ac05662a1e841079328eff9dfdb3690578b2`; only formal training materialization is exposed | orchestrator/operator | open | add or use an operator-supported model-input materialization path; do not fake a training bundle or download 10 GB per run |
 | I004 | parity | DA3 environment | medium | FastVideo interpreter lacks DA3 dependencies; DA3 interpreter cannot import the full FastVideo package because it lacks unrelated `cloudpickle` | exact adapter file and pinned vendored DA3 API import successfully in the DA3 interpreter | component:depth | mitigated | standalone gate records exact adapter/source/interpreter provenance; it does not claim package-level FastVideo import |
+| I005 | pipeline | T5 tokenizer lifecycle | high | loading the real text encoder re-ran `T5ArchConfig.__post_init__` and dropped Matrix's fixed-length padding override | Base-third V2 failed before generation on six unequal caption lengths | orchestrator | resolved | preserve inherited tokenizer overrides when T5 arch metadata refreshes; regression plus Base-third V3 real-tokenizer and full-video gates pass |
 
 ## Escape Hatches
 
@@ -111,6 +114,6 @@
 
 - Shared DiT, arbitrary-position RoPE, PRoPE, physical Base hole dropping, subject-reference memory, Base first/third rollouts, all three Distilled profiles, camera, Patch Memory, schedule, converter, VAE/text boundaries, and direct-official CPU contracts are implemented.
 - Base first/third checkpoints, pinned Wan2.2 Diffusers components, and pinned DA3 are immutable Shifu inputs. Distilled remains blocked on legal shared-input materialization.
-- Formal Base transformer, shared Wan VAE/UMT5/tokenizer, and standalone DA3 gates reached terminal success; their inspected jobs and evidence boundaries are recorded above.
+- Formal Base transformer, shared Wan VAE/UMT5/tokenizer, standalone DA3, and both Base end-to-end gates reached terminal success; their inspected jobs and evidence boundaries are recorded above.
 - Treat the current `fastvideo/platforms/cuda.py` GPU-UUID incompatibility as a separate cross-cutting infra change if the Matrix-Game Shifu path exercises it.
 - Do not activate registry entries until all required component and pipeline parity checks are non-skip passes.
