@@ -169,7 +169,7 @@ def test_text_stage_batches_positive_sections_and_encodes_negative_once() -> Non
     stage.encode_text = MethodType(fake_encode_text, stage)
     batch = ForwardBatch(
         data_type="video",
-        prompt="fallback",
+        prompt=None,
         section_prompts=["first", "second"],
         negative_prompt="negative",
         prompt_attention_mask=[],
@@ -177,12 +177,15 @@ def test_text_stage_batches_positive_sections_and_encodes_negative_once() -> Non
         num_frames=169,
         guidance_scale=3.0,
     )
-    args = SimpleNamespace(pipeline_config=SimpleNamespace(text_encoder_configs=[object()]))
+    args = SimpleNamespace(
+        pipeline_config=SimpleNamespace(text_encoder_configs=[object()]),
+        enable_stage_verification=True,
+    )
 
-    output = stage.forward(batch, args)
+    output = stage(batch, args)
 
     assert calls == [["first", "second"], "negative"]
-    assert output.prompt == "fallback"
+    assert output.prompt is None
     assert output.prompt_embeds[0].shape == (2, 2, 3)
     assert output.negative_prompt_embeds[0].shape == (1, 2, 3)
     assert output.prompt_attention_mask[0].shape == (2, 2)

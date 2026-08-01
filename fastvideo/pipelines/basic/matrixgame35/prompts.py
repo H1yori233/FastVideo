@@ -14,6 +14,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.basic.matrixgame35.camera import RGB_FRAMES_PER_BLOCK
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
+from fastvideo.pipelines.stages.validators import StageValidators as V, VerificationResult
 
 MATRIXGAME35_NEGATIVE_PROMPT = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，"
                                 "最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，"
@@ -192,6 +193,15 @@ def resolve_matrixgame35_section_prompts(
 
 class MatrixGame35TextEncodingStage(TextEncodingStage):
     """Encode all positive section prompts once and one shared CFG negative."""
+
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+        result = super().verify_input(batch, fastvideo_args)
+        result.add_check(
+            "prompt",
+            batch.section_prompts,
+            lambda value: V.list_not_empty(value) and V.string_or_list_strings(value),
+        )
+        return result
 
     @staticmethod
     def _validate_embeddings(batch: ForwardBatch, num_sections: int) -> None:
