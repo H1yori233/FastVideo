@@ -74,7 +74,7 @@ from fastvideo.pipelines.basic.matrixgame35.runtime import (
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
-from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.pipelines.stages.validators import StageValidators as V, VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
 
 DISTILLED_DEFAULT_PROFILE = "standard"
@@ -90,6 +90,16 @@ DISTILLED_NEGATIVE_PROMPT = MATRIXGAME35_NEGATIVE_PROMPT
 
 class MatrixGame35DistilledInputValidationStage(InputValidationStage):
     """Validate a released profile while preserving seed/block overrides."""
+
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+        result = super().verify_input(batch, fastvideo_args)
+        has_caption = isinstance(batch.caption_path, str) and bool(batch.caption_path)
+        result.add_check(
+            "prompt_or_embeds",
+            None,
+            lambda _: V.string_or_list_strings(batch.prompt) or V.list_not_empty(batch.prompt_embeds) or has_caption,
+        )
+        return result
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if (batch.height, batch.width) != (DISTILLED_HEIGHT, DISTILLED_WIDTH):

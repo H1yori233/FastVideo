@@ -655,10 +655,9 @@ def test_distilled_validation_materializes_official_caption_json(tmp_path: Path)
         seed=3407,
     )
 
-    output = MatrixGame35DistilledInputValidationStage().forward(
-        batch,
-        _args(MatrixGame35DistilledFirstPersonPipelineConfig()),
-    )
+    args = _args(MatrixGame35DistilledFirstPersonPipelineConfig())
+    args.enable_stage_verification = True
+    output = MatrixGame35DistilledInputValidationStage()(batch, args)
 
     assert output.prompt is None
     assert output.caption_path == str(caption_path)
