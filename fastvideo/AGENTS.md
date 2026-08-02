@@ -26,6 +26,7 @@ fastvideo/
 ├── entrypoints/     # cli/, openai/, streaming/, video_generator.py
 ├── hooks/           # Runtime hook system for pipelines
 ├── layers/          # Tensor-parallel linears + attention wrappers (port targets)
+├── memory/          # Stateful scene/context memory; model K/V caches stay with model code
 ├── models/          # DiT / VAE / encoder / scheduler / loader (pre-commit excluded)
 ├── pipelines/       # basic/<model>/, preprocess/, stages/, training/
 ├── platforms/       # CUDA/ROCm capability + AttentionBackendEnum
@@ -46,6 +47,7 @@ fastvideo/
 |------|----------|
 | Add a new pipeline class | `pipelines/basic/<model>/` + `configs/pipelines/<model>.py` + register in `registry.py` |
 | Add a new model component | `models/<role>/<model>.py` + `configs/models/<role>/<model>.py` |
+| Add scene/context memory | `memory/<model>/`; keep attention K/V caches with the owning model |
 | Wire an existing model into a new pipeline | `pipelines/basic/<model>/presets.py` + reuse stages from `pipelines/stages/` |
 | Add a converter | `scripts/checkpoint_conversion/<model>_to_*.py` (separate dir, separate AGENTS.md) |
 | Add an attention backend | `attention/backends/<name>.py` + register in selector |
@@ -56,6 +58,7 @@ fastvideo/
 - `PipelineStage` subclasses (`pipelines/stages/`) own one verb each (encode, schedule, denoise, decode). Compose, don't fork.
 - Every pipeline reads from a `PipelineConfig` subclass and a `SamplingParam`. Never read raw env vars inside a stage — go through `fastvideo.envs`.
 - Logger setup: `from fastvideo.logger import init_logger; logger = init_logger(__name__)`. Do not call `logging.getLogger` directly.
+- Memory packages must not import pipeline implementations. Start model-scoped and extract shared APIs only after a second consumer proves the common contract.
 - Imports between `train/` and `training/` are **forbidden** — they are independent stacks.
 
 ## Pre-Commit Exclusions (do not assume linted)

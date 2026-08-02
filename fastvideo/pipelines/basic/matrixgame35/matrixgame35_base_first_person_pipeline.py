@@ -7,13 +7,13 @@ from fastvideo.api.sampling_param import SamplingParam
 from fastvideo.configs.pipelines.matrixgame35 import MatrixGame35BaseFirstPersonPipelineConfig
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.memory.matrixgame35.depth_estimation import MatrixGame35DepthAnything3Adapter
+from fastvideo.memory.matrixgame35.patch_memory import MatrixGame35DepthAdapter
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.basic.matrixgame35.base_stages import (
     MatrixGame35BaseInputValidationStage,
     MatrixGame35BaseRolloutStage,
 )
-from fastvideo.pipelines.basic.matrixgame35.depth_estimation import MatrixGame35DepthAnything3Adapter
-from fastvideo.pipelines.basic.matrixgame35.patch_memory import MatrixGame35DepthAdapter
 from fastvideo.pipelines.basic.matrixgame35.prompts import MatrixGame35TextEncodingStage
 from fastvideo.pipelines.stages import ConditioningStage
 

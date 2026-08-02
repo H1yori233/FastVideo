@@ -17,6 +17,21 @@ from fastvideo.configs.pipelines.matrixgame35 import (
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.memory.matrixgame35.depth_estimation import is_da3_insufficient_non_sky_error
+from fastvideo.memory.matrixgame35.dynamic_context import (
+    MatrixGame35DynamicContextEntry,
+    MatrixGame35DynamicContextPool,
+)
+from fastvideo.memory.matrixgame35.patch_memory import (
+    MatrixGame35DepthAdapter,
+    MatrixGame35DistilledPatchMemory,
+)
+from fastvideo.models.dits.matrixgame35.kv_cache import (
+    causal_kv_frame_count,
+    concat_causal_kv_caches,
+    tail_causal_kv_cache_frames,
+    trim_causal_kv_rolling_window,
+)
 from fastvideo.pipelines.basic.matrixgame35.camera import (
     RGB_FRAMES_PER_BLOCK,
     RGB_SUBFRAMES_PER_LATENT,
@@ -34,18 +49,6 @@ from fastvideo.pipelines.basic.matrixgame35.codec import (
     matrixgame35_uint8_to_frames,
     matrixgame35_video_to_uint8,
 )
-from fastvideo.pipelines.basic.matrixgame35.causal_kv_cache import (
-    causal_kv_frame_count,
-    concat_causal_kv_caches,
-    tail_causal_kv_cache_frames,
-    trim_causal_kv_rolling_window,
-)
-from fastvideo.pipelines.basic.matrixgame35.distilled_memory import (
-    MatrixGame35DistilledPatchMemory,
-    MatrixGame35DynamicContextEntry,
-    MatrixGame35DynamicContextPool,
-    is_da3_insufficient_non_sky_error,
-)
 from fastvideo.pipelines.basic.matrixgame35.distilled_profiles import (
     distilled_hiar_noise_seed,
     distilled_profile_guidance_scale,
@@ -53,7 +56,6 @@ from fastvideo.pipelines.basic.matrixgame35.distilled_profiles import (
     make_distilled_hiar_noise,
     trim_distilled_rolling_latents,
 )
-from fastvideo.pipelines.basic.matrixgame35.patch_memory import MatrixGame35DepthAdapter
 from fastvideo.pipelines.basic.matrixgame35.prompts import (
     MATRIXGAME35_NEGATIVE_PROMPT,
     resolve_matrixgame35_section_prompts,

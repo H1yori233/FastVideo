@@ -162,6 +162,12 @@ the DreamX UMT5 config and applies only Matrix-Game's official constructor and
 tokenizer deltas: gated GELU, inference-inert dropout `0.1`, whitespace cleanup,
 and fixed right-padded length `512`.
 
+`fastvideo/memory/matrixgame35/` owns scene reconstruction, dynamic visual
+context, and the two lazy DA3 runtime boundaries. It is deliberately
+model-scoped: the package has no generic base class and does not import pipeline
+implementations. Attention K/V-cache operations remain with the MatrixGame35
+DiT because they depend on its cache tensor and metadata layout.
+
 ## Verification Matrix
 
 The committed suite is intentionally acceptance-oriented. It keeps one test
@@ -176,6 +182,7 @@ real-weight pipeline gates instead of separate micro-test files.
 | UMT5 + tokenizer | official Wan text encoder/tokenizer; HF Transformers `UMT5EncoderModel` | `tests/local_tests/matrixgame35/test_matrixgame35_text_encoder_parity.py` | hidden states, fixed padding, whitespace cleaning | direct-official CPU config/cleaning pass; independent snapshot tokenizer/UMT5 Shifu gates pass; raw-weight gate retained separately |
 | converter | three published safetensors checkpoints | `tests/local_tests/matrixgame35/test_matrixgame35_conversion.py` | exact key/shape surface, BF16 preservation, strict load, transactional output | synthetic CPU and all three real-weight Shifu gates pass |
 | distilled policies | `distilled_config.py`; causal schedule/memory helpers | `tests/local_tests/matrixgame35/test_matrixgame35_distilled_profile_parity.py` | STANDARD, HiAR-SDE, and sink-anchor-context policy deltas | direct pinned CPU parity passes |
+| scene/context memory | `frustum/`; DA3; causal dynamic-context selection | `fastvideo/tests/memory/test_matrixgame35_memory.py` | append/query, Base near-z versus Distilled far-z policy, context selection, Base 504 versus Distilled 448 DA3 boundaries | focused CPU contract plus recorded direct-pinned and Shifu gates |
 | public pipelines | three model IDs and emitted `model_index.json` files | `tests/local_tests/pipelines/test_matrixgame35_pipeline_smoke.py` | registry, exact pipeline class resolution, presets | local smoke pass; all five real-weight rollout cases pass on Shifu |
 
 Local CPU runs may legitimately skip CUDA/weight paths, but a skip is not a

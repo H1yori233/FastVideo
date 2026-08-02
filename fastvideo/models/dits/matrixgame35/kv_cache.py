@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Bounded K/V-cache operations for Matrix-Game 3.5 distilled rollout."""
+"""Model-owned K/V-cache operations for Matrix-Game 3.5 causal attention."""
 
 from __future__ import annotations
 

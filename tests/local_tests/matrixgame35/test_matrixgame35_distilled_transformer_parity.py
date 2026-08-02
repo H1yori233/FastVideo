@@ -31,7 +31,7 @@ import torch
 from torch.testing import assert_close
 
 from fastvideo.forward_context import set_forward_context
-from fastvideo.pipelines.basic.matrixgame35.causal_kv_cache import (
+from fastvideo.models.dits.matrixgame35.kv_cache import (
     concat_causal_kv_caches,
     copy_causal_kv_caches,
     tail_causal_kv_cache_frames,

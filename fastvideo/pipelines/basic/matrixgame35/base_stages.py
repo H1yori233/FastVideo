@@ -14,6 +14,10 @@ import torch.nn.functional as F
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.memory.matrixgame35.patch_memory import (
+    MatrixGame35BasePatchMemory,
+    MatrixGame35DepthAdapter,
+)
 from fastvideo.models.vision_utils import load_image, load_video
 from fastvideo.pipelines.basic.matrixgame35.camera import (
     RGB_FRAMES_PER_BLOCK,
@@ -31,10 +35,6 @@ from fastvideo.pipelines.basic.matrixgame35.codec import (
     matrixgame35_video_to_uint8,
 )
 from fastvideo.pipelines.basic.matrixgame35.layout import build_noncausal_latent_layout
-from fastvideo.pipelines.basic.matrixgame35.patch_memory import (
-    MatrixGame35BasePatchMemory,
-    MatrixGame35DepthAdapter,
-)
 from fastvideo.pipelines.basic.matrixgame35.prompts import (
     MATRIXGAME35_NEGATIVE_PROMPT,
     resolve_matrixgame35_section_prompts,

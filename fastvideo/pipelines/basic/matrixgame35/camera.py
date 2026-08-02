@@ -9,8 +9,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-RGB_FRAMES_PER_BLOCK = 84
-RGB_SUBFRAMES_PER_LATENT = 4
+from fastvideo.memory.matrixgame35.constants import (
+    RGB_FRAMES_PER_BLOCK,
+    RGB_SUBFRAMES_PER_LATENT,
+)
 
 
 @dataclass(frozen=True)

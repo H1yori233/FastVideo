@@ -10,7 +10,7 @@ from typing import Protocol
 import numpy as np
 import torch
 
-from fastvideo.pipelines.basic.matrixgame35.camera import (
+from fastvideo.memory.matrixgame35.constants import (
     RGB_FRAMES_PER_BLOCK,
     RGB_SUBFRAMES_PER_LATENT,
 )
@@ -20,6 +20,10 @@ CANDIDATES_PER_QUERY_GROUP = 5
 POSE_NMS_DISTANCE = 0.1
 CANDIDATE_POOL_MULTIPLIER = 2.0
 FILL_RATIO_THRESHOLD = 0.95
+DISTILLED_CANDIDATES_PER_QUERY_GROUP = 5
+DISTILLED_COVERAGE_GRID_DOWNSAMPLE = 4
+DISTILLED_COVERAGE_POOL_STRIDE = 2
+DISTILLED_FILL_RATIO_THRESHOLD = 0.95
 
 
 class MatrixGame35DepthAdapter(Protocol):
@@ -32,6 +36,16 @@ class MatrixGame35DepthAdapter(Protocol):
 @dataclass(frozen=True)
 class MatrixGame35PatchMemoryResult:
     """Mosaic latents and selection evidence for one 84-frame Base block."""
+
+    latents: torch.Tensor
+    valid_mask: torch.Tensor
+    candidate_frame_ids: tuple[tuple[int, ...], ...]
+    aligned_query_w2c: np.ndarray
+
+
+@dataclass(frozen=True)
+class MatrixGame35DistilledMemoryResult:
+    """One three-latent mosaic and its geometry-selection evidence."""
 
     latents: torch.Tensor
     valid_mask: torch.Tensor
@@ -374,3 +388,189 @@ class MatrixGame35BasePatchMemory:
             candidate_frame_ids=candidate_ids,
             aligned_query_w2c=aligned,
         )
+
+
+class MatrixGame35DistilledPatchMemory(MatrixGame35BasePatchMemory):
+    """C0 + generated append-only memory with released STANDARD policies."""
+
+    @staticmethod
+    def _align_query(anchor_w2c: np.ndarray, query_w2c: np.ndarray, target_w2c: np.ndarray) -> np.ndarray:
+        anchor = np.asarray(anchor_w2c, dtype=np.float32)
+        query = np.asarray(query_w2c, dtype=np.float32)
+        target = np.asarray(target_w2c, dtype=np.float32)
+        if anchor.shape != (4, 4) or query.ndim != 3 or query.shape[1:] != (4, 4):
+            raise ValueError("anchor_w2c/query_w2c must have shapes [4,4] and [Q,4,4].")
+        trajectory = np.concatenate((anchor[None], query), axis=0)
+        aligned = trajectory @ (np.linalg.inv(trajectory[0]) @ target)
+        return np.ascontiguousarray(aligned[1:].astype(np.float32))
+
+    def select_candidate_frame_ids(
+        self,
+        query_w2c: np.ndarray,
+        query_intrinsics: np.ndarray,
+    ) -> tuple[tuple[int, ...], ...]:
+        """Select five frames/group by greedy union coverage over a stride-2 pool."""
+        query = np.asarray(query_w2c, dtype=np.float64)
+        query_K = np.asarray(query_intrinsics, dtype=np.float64)
+        if query.ndim != 3 or query.shape[1:] != (4, 4) or query.shape[0] % RGB_SUBFRAMES_PER_LATENT:
+            raise ValueError("distilled memory query poses must have shape [4*k,4,4].")
+        if query_K.shape != (query.shape[0], 3, 3):
+            raise ValueError(f"query intrinsics must have shape [{query.shape[0]},3,3].")
+
+        height, width = map(int, self.latents.shape[-2:])
+        downsample = DISTILLED_COVERAGE_GRID_DOWNSAMPLE
+        coarse_height, coarse_width = height // downsample, width // downsample
+        if coarse_height <= 0 or coarse_width <= 0:
+            raise ValueError("latent dimensions must be at least the coverage downsample factor.")
+        pool = np.arange(0, self.num_frames, DISTILLED_COVERAGE_POOL_STRIDE)
+        memory_count = len(pool)
+        group_count = query.shape[0] // RGB_SUBFRAMES_PER_LATENT
+
+        depth_grid = np.stack(
+            [_nearest_resize_depth(self.depths[int(frame_id)], coarse_height, coarse_width) for frame_id in pool],
+            axis=0,
+        ).astype(np.float64)
+        rows, columns = np.meshgrid(np.arange(coarse_height), np.arange(coarse_width), indexing="ij")
+        stride = LATENT_STRIDE * downsample
+        pixels = np.stack(
+            (
+                (columns.reshape(-1) * stride).astype(np.float64),
+                (rows.reshape(-1) * stride).astype(np.float64),
+                np.ones(coarse_height * coarse_width, dtype=np.float64),
+            ),
+            axis=0,
+        )
+        point_count = pixels.shape[1]
+        depth_flat = depth_grid.reshape(memory_count, point_count)
+        memory_w2c = self.w2c.astype(np.float64)[pool]
+        inverse_K = np.linalg.inv(self.intrinsics.astype(np.float64)[pool])
+        rays = np.einsum("mij,jp->mip", inverse_K, pixels)
+        camera_points = rays * depth_flat[:, None, :] - memory_w2c[:, :3, 3, None]
+        world_points = np.einsum("mji,mjp->mip", memory_w2c[:, :3, :3], camera_points)
+
+        query_indices = [
+            group * RGB_SUBFRAMES_PER_LATENT + (RGB_SUBFRAMES_PER_LATENT - 1) for group in range(group_count)
+        ]
+        query_rotation = query[query_indices, :3, :3]
+        query_translation = query[query_indices, :3, 3]
+        projected_camera = (np.einsum("gij,mjp->gmip", query_rotation, world_points) +
+                            query_translation[:, None, :, None])
+        projected = np.einsum("gij,gmjp->gmip", query_K[query_indices], projected_camera)
+        depth = projected[:, :, 2]
+        valid = (np.isfinite(depth) & (depth > 1e-2) & np.isfinite(depth_flat)[None] & (depth_flat[None] > 1e-3))
+        denominator = np.where(valid, depth, 1.0)
+        full_rows = np.rint(projected[:, :, 1] / denominator / LATENT_STRIDE).astype(np.int64)
+        full_columns = np.rint(projected[:, :, 0] / denominator / LATENT_STRIDE).astype(np.int64)
+        coarse_rows = full_rows // downsample
+        coarse_columns = full_columns // downsample
+        in_bounds = (valid
+                     & (coarse_rows >= 0)
+                     & (coarse_rows < coarse_height)
+                     & (coarse_columns >= 0)
+                     & (coarse_columns < coarse_width))
+        masks = np.zeros((group_count, memory_count, coarse_height, coarse_width), dtype=bool)
+        group_ids, memory_ids, point_ids = np.where(in_bounds)
+        masks[
+            group_ids,
+            memory_ids,
+            coarse_rows[group_ids, memory_ids, point_ids],
+            coarse_columns[group_ids, memory_ids, point_ids],
+        ] = True
+
+        selected: list[tuple[int, ...]] = []
+        flat_masks = masks.reshape(group_count, memory_count, -1)
+        areas = flat_masks.sum(axis=2)
+        for group in range(group_count):
+            union = np.zeros(flat_masks.shape[-1], dtype=bool)
+            available = np.ones(memory_count, dtype=bool)
+            picked: list[int] = []
+            for _ in range(DISTILLED_CANDIDATES_PER_QUERY_GROUP):
+                gain = (flat_masks[group] & ~union).sum(axis=1)
+                gain[~available] = -1
+                best = int(gain.argmax())
+                if gain[best] <= 0:
+                    break
+                union |= flat_masks[group, best]
+                picked.append(int(pool[best]))
+                available[best] = False
+            if len(picked) < DISTILLED_CANDIDATES_PER_QUERY_GROUP:
+                remaining_area = areas[group].copy()
+                remaining_area[~available] = -1
+                for best in np.argsort(-remaining_area):
+                    if available[best] and remaining_area[best] > 0:
+                        picked.append(int(pool[best]))
+                        available[best] = False
+                    if len(picked) == DISTILLED_CANDIDATES_PER_QUERY_GROUP:
+                        break
+            if not picked:
+                picked = [-1]
+            picked.extend([picked[-1]] * (DISTILLED_CANDIDATES_PER_QUERY_GROUP - len(picked)))
+            selected.append(tuple(picked))
+        return tuple(selected)
+
+    def fuse_candidates(
+        self,
+        query_w2c: np.ndarray,
+        query_intrinsics: np.ndarray,
+        candidate_frame_ids: Sequence[Sequence[int]],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Nearest splat per candidate, then far-z fill-stop across candidates."""
+        query = np.asarray(query_w2c, dtype=np.float32)
+        query_K = np.asarray(query_intrinsics, dtype=np.float32)
+        expected_groups = query.shape[0] // RGB_SUBFRAMES_PER_LATENT
+        if len(candidate_frame_ids) != expected_groups:
+            raise ValueError(f"expected {expected_groups} candidate groups, got {len(candidate_frame_ids)}.")
+
+        output_latents: list[torch.Tensor] = []
+        output_masks: list[torch.Tensor] = []
+        for group, frame_ids in enumerate(candidate_frame_ids):
+            query_index = group * RGB_SUBFRAMES_PER_LATENT + (RGB_SUBFRAMES_PER_LATENT - 1)
+            fused = torch.zeros_like(self.latents[:, :1])
+            filled = torch.zeros(self.latents.shape[-2:], dtype=torch.bool)
+            best_depth = torch.full(self.latents.shape[-2:], float("-inf"), dtype=torch.float32)
+            unique_ids: list[int] = []
+            for frame_id in frame_ids:
+                frame_id = int(frame_id)
+                if frame_id >= 0 and frame_id not in unique_ids:
+                    unique_ids.append(frame_id)
+            if not unique_ids:
+                unique_ids = [0]
+            for frame_id in unique_ids:
+                if frame_id >= self.num_frames:
+                    raise ValueError(f"candidate frame {frame_id} is outside the {self.num_frames}-frame bank.")
+                splat, valid, depth = self._splat_candidate(
+                    frame_id,
+                    query_w2c=query[query_index],
+                    query_K=query_K[query_index],
+                )
+                wins = valid & (depth > best_depth)
+                fused = torch.where(wins[None, None], splat, fused)
+                filled |= wins
+                best_depth = torch.where(wins, depth, best_depth)
+                if float(filled.float().mean()) >= DISTILLED_FILL_RATIO_THRESHOLD:
+                    break
+            output_latents.append(fused)
+            output_masks.append(filled)
+        return torch.cat(output_latents, dim=1), torch.stack(output_masks)
+
+    def query(
+        self,
+        *,
+        anchor_w2c: np.ndarray,
+        query_w2c: np.ndarray,
+        query_intrinsics: np.ndarray,
+    ) -> MatrixGame35DistilledMemoryResult:
+        """Align, select, and fuse the current three-latent mosaic."""
+        aligned = self._align_query(anchor_w2c, query_w2c, self.w2c[-1])
+        candidates = self.select_candidate_frame_ids(aligned, query_intrinsics)
+        latents, valid_mask = self.fuse_candidates(aligned, query_intrinsics, candidates)
+        return MatrixGame35DistilledMemoryResult(latents, valid_mask, candidates, aligned)
+
+
+__all__ = [
+    "MatrixGame35BasePatchMemory",
+    "MatrixGame35DepthAdapter",
+    "MatrixGame35DistilledMemoryResult",
+    "MatrixGame35DistilledPatchMemory",
+    "MatrixGame35PatchMemoryResult",
+]

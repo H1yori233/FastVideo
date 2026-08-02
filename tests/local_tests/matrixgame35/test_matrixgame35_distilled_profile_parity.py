@@ -19,7 +19,7 @@ from fastvideo.configs.pipelines.matrixgame35 import (
     matrixgame35_distilled_profile_settings,
     resolve_matrixgame35_hiar_scales,
 )
-from fastvideo.pipelines.basic.matrixgame35.distilled_memory import (
+from fastvideo.memory.matrixgame35.dynamic_context import (
     MatrixGame35DynamicContextEntry,
     MatrixGame35DynamicContextPool,
 )
