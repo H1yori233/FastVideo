@@ -9,11 +9,11 @@ import torch
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.basic.matrixgame35.base_first_person_stages import (
+from fastvideo.pipelines.basic.matrixgame35.base_stages import (
     MatrixGame35BaseInputValidationStage, )
 from fastvideo.pipelines.basic.matrixgame35.codec import encode_matrixgame35_video
 from fastvideo.pipelines.basic.matrixgame35.runtime import run_matrixgame35_vae_operation
-from fastvideo.pipelines.basic.matrixgame35.subject_refs import load_subject_reference_canvases
+from fastvideo.pipelines.basic.matrixgame35.subject_references import load_subject_reference_canvases
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 

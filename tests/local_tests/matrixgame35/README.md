@@ -162,30 +162,29 @@ the DreamX UMT5 config and applies only Matrix-Game's official constructor and
 tokenizer deltas: gated GELU, inference-inert dropout `0.1`, whitespace cleanup,
 and fixed right-padded length `512`.
 
-## Expected Parity Tests
+## Verification Matrix
 
-| Component | Official files / args | Planned test | Main concern | Status |
+The committed suite is intentionally acceptance-oriented. It keeps one test
+surface for each independently loaded component plus two integrated DiT paths;
+helper-only behavior is covered through those integrated paths and the recorded
+real-weight pipeline gates instead of separate micro-test files.
+
+| Component | Official files / args | Test | Main concern | Status |
 |---|---|---|---|---|
 | Matrix-Game DiT / PRoPE | `diffsynth/models/wan_video_dit.py`; `diffsynth/models/prope_attention.py`; 30 layers, PRoPE every block | `tests/local_tests/matrixgame35/test_matrixgame35_transformer_parity.py`; `test_matrixgame35_noncausal_model_fn_parity.py`; `test_matrixgame35_causal_model_fn_parity.py` | arbitrary-time native RoPE, PRoPE, physical mosaic-hole drop/scatter, causal pre-RoPE K/raw-V cache, per-token timestep, frozen memory prefixes, dtype boundaries | direct pinned noncausal and causal CPU parity pass (`max_abs_diff<=1.67e-06`); Base first/third and Distilled real-weight Shifu pass |
-| subject-reference tokens | `diffsynth/pipelines/wan_video.py::_build_subject_ref_memory_tokens` | `tests/local_tests/matrixgame35/test_matrixgame35_subject_ref_parity.py`; `test_matrixgame35_noncausal_model_fn_parity.py` | 2/4-slot shapes, packing, negative-time RoPE, masks, model integration | direct-official CPU helper and integrated model parity pass |
 | Wan2.2 VAE | official `WanVideoVAE38`; raw `Wan2.2_VAE.pth`; HF Diffusers `AutoencoderKLWan` | `tests/local_tests/matrixgame35/test_matrixgame35_vae_parity.py` | encode/decode, 3.8 temporal stride, and exact 704x1280 weighted tiling | direct-official CPU config pass; independent Diffusers CUDA and release-resolution tiled Shifu gates pass; raw-weight gate retained separately |
 | UMT5 + tokenizer | official Wan text encoder/tokenizer; HF Transformers `UMT5EncoderModel` | `tests/local_tests/matrixgame35/test_matrixgame35_text_encoder_parity.py` | hidden states, fixed padding, whitespace cleaning | direct-official CPU config/cleaning pass; independent snapshot tokenizer/UMT5 Shifu gates pass; raw-weight gate retained separately |
-| flow schedules | base FlowMatch shift 5; distilled `[1000, 667, 333]` | `tests/local_tests/matrixgame35/test_matrixgame35_schedule_parity.py` | sigma/timestep and three-step student transition | direct-official CPU parity passes |
-| camera preparation / PRoPE | `diffsynth/pipelines/wan_video.py`; camera `.npz` contract | `tests/local_tests/matrixgame35/test_matrixgame35_camera_parity.py` | c2w/w2c, pixel intrinsics, four sub-frame cameras | CPU contract passes |
-| DA3 depth adapter | vendored official `depth_anything_3.api.DepthAnything3` | `tests/local_tests/matrixgame35/test_matrixgame35_depth_adapter.py` | lazy loading; Base process resolution 504; Distilled 448; metric-depth output | local source/config pass; standalone pinned-interpreter CUDA gate passes with finite FP32 `[1,350,504]` depth |
-| Patch Memory | `frustum/`; `examples/wanvideo/pipeline/mosaic/` | `tests/local_tests/matrixgame35/test_matrixgame35_memory_parity.py`; `test_matrixgame35_distilled_memory_parity.py` | visibility, z-buffer fusion, candidate selection, no cross-block leakage | direct pinned CPU parity passes |
-| base first-person pipeline | `infer.py --person first` + `configs/infer_first_person.yaml` | `tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py` | 25-step 704x1280 rollout; 84 generated RGB frames/block | focused fake-component control-flow pass; full official-case Shifu video gate passes with 505 decoded frames |
-| base third-person pipeline | `infer.py --person third` + optional refs | `tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py` | no-ref and 1-4-ref paths | focused fake-component control-flow pass; full official-case one-ref Shifu video gate passes with 505 decoded frames |
-| distilled first-person pipeline | `infer_distilled.py`; `configs/infer_distilled.yaml`; `distilled_config.py` | `tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py`; `tests/local_tests/matrixgame35/test_matrixgame35_distilled_profile_parity.py` | shared causal KV/cache-fill path; STANDARD CFG=3; HiAR CFG=1 with per-step rolling/dynamic-context corruption; sink C0 context | direct pinned CPU profile/helper parity and focused fake pipeline paths pass; all three real-weight 505-frame Shifu gates pass |
+| converter | three published safetensors checkpoints | `tests/local_tests/matrixgame35/test_matrixgame35_conversion.py` | exact key/shape surface, BF16 preservation, strict load, transactional output | synthetic CPU and all three real-weight Shifu gates pass |
+| distilled policies | `distilled_config.py`; causal schedule/memory helpers | `tests/local_tests/matrixgame35/test_matrixgame35_distilled_profile_parity.py` | STANDARD, HiAR-SDE, and sink-anchor-context policy deltas | direct pinned CPU parity passes |
+| public pipelines | three model IDs and emitted `model_index.json` files | `tests/local_tests/pipelines/test_matrixgame35_pipeline_smoke.py` | registry, exact pipeline class resolution, presets | local smoke pass; all five real-weight rollout cases pass on Shifu |
 
 Local CPU runs may legitimately skip CUDA/weight paths, but a skip is not a
 verified pass. Final acceptance requires queue-terminal Shifu jobs and inspected
 logs/artifacts for every released variant.
 
-The final targeted local result is `304 passed, 15 skipped`; its exact command
-is recorded in `PORT_STATUS.md`. The local skips are CUDA or optional raw-asset
-gates whose corresponding real-weight Shifu jobs are recorded there; no skip is
-counted as a local pass.
+The exact lean-suite command and latest result are recorded in
+`PORT_STATUS.md`. Local CUDA or optional-asset skips are never counted as passes;
+their corresponding real-weight Shifu jobs are recorded there.
 
 ## Review Notes
 

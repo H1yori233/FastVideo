@@ -14,7 +14,7 @@ from fastvideo.configs.models.dits.matrixgame35 import (
     MatrixGame35WanVideoConfig,
 )
 from fastvideo.forward_context import set_forward_context
-from fastvideo.models.dits._matrixgame35_rope import (
+from fastvideo.models.dits.matrixgame35.rope import (
     apply_matrixgame35_rope,
     build_matrixgame35_rope_frequencies,
     matrixgame35_rope_tables,

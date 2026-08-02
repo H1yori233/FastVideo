@@ -13,10 +13,10 @@
 
 ## Current Phase
 
-- phase: `Phase 7 public pipeline activation complete`
+- phase: `Phase 8 review hardening complete`
 - status: `complete`
 - owner: `orchestrator`
-- last_updated: `2026-08-01`
+- last_updated: `2026-08-02`
 
 ## Component Matrix
 
@@ -31,7 +31,7 @@
 | camera preparation | generic | port/reuse_pending | `diffsynth/pipelines/wan_video.py`; `infer.py::load_camera` | c2w matrices + pixel intrinsics; w2c accepted by inversion | model-specific conditioning stage | complete | not_required | cpu_pass | none |
 | DA3 metric depth | encoder/preprocessor | lazy external reuse verified | vendored `third_party/depth-anything-3`; `depth_anything_3.api.DepthAnything3` | `depth-anything/DA3NESTED-GIANT-LARGE-1.1`; Base process resolution 504, Distilled 448 | lazy Matrix-scoped adapters without dependency-pin changes | adapter_complete | external_pinned_asset | local source/config pass; real CUDA standalone Shifu gate pass | I004 |
 | Patch Memory / frustum reprojection | generic | port minimal inference subset | `frustum/`; `examples/wanvideo/pipeline/mosaic/` | projection-IoU/pose selection and visibility-aware z-buffer fusion | shared helpers with Base and Distilled policies | complete | not_required | direct_pinned_cpu_pass | none |
-| pipeline variants | pipeline | port | `infer.py`; `infer_distilled.py`; four YAML configs | base first, base third no-ref/ref, distilled first; 84 generated RGB frames/block | `fastvideo/pipelines/basic/matrixgame35/` | local_fake_complete | transformer_converter_complete | focused pipeline pass; Base first/third plus all three Distilled profiles pass real-weight 505-frame Shifu gates | none |
+| pipeline variants | pipeline | port | `infer.py`; `infer_distilled.py`; four YAML configs | base first, base third no-ref/ref, distilled first; 84 generated RGB frames/block | `fastvideo/pipelines/basic/matrixgame35/` | registry_smoke_pass | transformer_converter_complete | Base first/third plus all three Distilled profiles pass real-weight 505-frame Shifu gates | none |
 
 ## Conversion State
 
@@ -50,14 +50,10 @@
 | noncausal integrated model | `pytest tests/local_tests/matrixgame35/test_matrixgame35_noncausal_model_fn_parity.py -v -s` | `2 passed` | real pinned `model_fn_wan_video`; physical hole drop/scatter with and without subject prefix, disabled/no-hole regression, arbitrary RoPE; `max_abs_diff=7.75e-07` |
 | causal integrated model | `pytest tests/local_tests/matrixgame35/test_matrixgame35_causal_model_fn_parity.py -v -s` | `1 passed` | real pinned `model_fn_causal_kv`; bootstrap/read-only denoise/final write/later re-anchored read, chunk IDs, and mosaic hole; `max_abs_diff=1.67e-06` |
 | distilled profiles | `MATRIXGAME35_OFFICIAL_REF_DIR=/path/to/pinned/source pytest tests/local_tests/matrixgame35/test_matrixgame35_distilled_profile_parity.py -q` | `5 passed` | direct pinned mapping, HiAR corruption/seeds/latent provenance, and sink C0 selection |
-| distilled focused pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py -q` | `14 passed` | all three profiles; fake component path only, not real-weight parity |
 | Wan2.2 VAE | `pytest tests/local_tests/matrixgame35/test_matrixgame35_vae_parity.py -v -s` | `1 passed, 3 skipped` | local CPU: config pass; CUDA raw, Diffusers component, and 704x1280 tiled gates skip without CUDA/assets |
 | UMT5/tokenizer | `pytest tests/local_tests/matrixgame35/test_matrixgame35_text_encoder_parity.py -v -s` | `5 passed, 4 skipped` | local CPU: source contracts pass; raw and Diffusers tokenizer/real-weight gates skip without their assets/CUDA |
-| shared components | `pytest tests/local_tests/matrixgame35 -q -rs` | `141 passed, 15 skipped` | measured on local CPU; includes nine public-registry tests; all skips are CUDA/assets gates and are not passes |
-| base first pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py -q` | included in `45 passed` pipeline suite | fake components; one- and two-block control flow, CFG/no-CFG, memory, offload, and exact inputs |
-| base third pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py -q` | included in `45 passed` pipeline suite | fake components; no-ref/direct-latent and 1-4 image-reference paths |
-| distilled pipeline | `pytest tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py -q` | `14 passed` | fake components; all three profiles, cache eviction, memory publication, and two-section prompt switching |
-| combined local | `pytest tests/local_tests/matrixgame35 tests/local_tests/pipelines/test_matrixgame35_base_first_person_pipeline.py tests/local_tests/pipelines/test_matrixgame35_base_third_person_pipeline.py tests/local_tests/pipelines/test_matrixgame35_distilled_standard_pipeline.py fastvideo/tests/api/test_parser.py fastvideo/tests/api/test_compat_translation.py fastvideo/tests/api/test_extra_overrides_routing.py fastvideo/tests/api/test_schema_parity_inventory.py fastvideo/tests/api/test_presets.py -q -rs` | `304 passed, 15 skipped` | Matrix contracts, registry/presets, and API; no skipped path counted as verified |
+| pipeline smoke | `pytest tests/local_tests/pipelines/test_matrixgame35_pipeline_smoke.py -q` | included in lean suite | exact IDs, model-index class resolution, and presets only; real rollouts are the Shifu gates below |
+| lean local suite | `pytest tests/local_tests/matrixgame35 tests/local_tests/pipelines/test_matrixgame35_pipeline_smoke.py fastvideo/tests/api/test_parser.py fastvideo/tests/api/test_compat_translation.py fastvideo/tests/api/test_extra_overrides_routing.py fastvideo/tests/api/test_schema_parity_inventory.py fastvideo/tests/api/test_presets.py -q -rs` | `156 passed, 14 skipped` | acceptance-level component parity, activation smoke, and API routing; skips are CUDA/assets gates already covered by the formal Shifu jobs below |
 
 ## Formal Shifu Gates
 
@@ -114,6 +110,7 @@
 | 2026-07-31 | Reuse LucyEdit/DreamX shared Wan2.2 VAE and UMT5 configs | Matrix-Game instantiates the same 48-channel VAE and UMT5-XXL weights; only fixed padding, whitespace cleaning, gated GELU, and constructor dropout differ from the existing DreamX helper surface | avoids duplicated 48-value latent statistics and keeps Matrix-specific tokenization explicit |
 | 2026-07-31 | Physically drop Base mosaic holes before transformer blocks and scatter zeros after the output head | both released Base YAMLs set `mosaic_drop_holes: true`; mask-only execution preserves values but not the released sequence length or VRAM contract | hidden states, RoPE, timestep, cross-attention mask, and PRoPE carriers use the same kept-token indices; distilled remains unchanged |
 | 2026-08-01 | Activate three registry entries only after every real-weight pipeline gate passed | prevents public reachability from outrunning parity evidence | three checkpoint configs/presets, one shared Distilled profile implementation, and one typed example |
+| 2026-08-02 | Keep only acceptance-level component, integrated-model, converter, profile, and registry tests | helper micro-tests and fake-component rollout tests duplicated stronger parity or Shifu E2E evidence | 26 test files reduced to 9 without removing a component or released-variant gate |
 
 ## Handoff Notes
 

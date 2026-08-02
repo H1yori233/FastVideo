@@ -25,7 +25,7 @@ from fastvideo.pipelines.basic.matrixgame35.camera import (
     load_camera_trajectory,
     normalize_matrixgame35_intrinsics,
 )
-from fastvideo.pipelines.basic.matrixgame35.base_first_person_stages import preprocess_matrixgame35_anchor
+from fastvideo.pipelines.basic.matrixgame35.base_stages import preprocess_matrixgame35_anchor
 from fastvideo.pipelines.basic.matrixgame35.codec import (
     decode_matrixgame35_tiled_video,
     encode_matrixgame35_video,
@@ -34,19 +34,19 @@ from fastvideo.pipelines.basic.matrixgame35.codec import (
     matrixgame35_uint8_to_frames,
     matrixgame35_video_to_uint8,
 )
-from fastvideo.pipelines.basic.matrixgame35.distilled_standard_kv import (
+from fastvideo.pipelines.basic.matrixgame35.causal_kv_cache import (
     causal_kv_frame_count,
     concat_causal_kv_caches,
     tail_causal_kv_cache_frames,
     trim_causal_kv_rolling_window,
 )
-from fastvideo.pipelines.basic.matrixgame35.distilled_standard_memory import (
+from fastvideo.pipelines.basic.matrixgame35.distilled_memory import (
     MatrixGame35DistilledPatchMemory,
     MatrixGame35DynamicContextEntry,
     MatrixGame35DynamicContextPool,
     is_da3_insufficient_non_sky_error,
 )
-from fastvideo.pipelines.basic.matrixgame35.distilled_standard_profiles import (
+from fastvideo.pipelines.basic.matrixgame35.distilled_profiles import (
     distilled_hiar_noise_seed,
     distilled_profile_guidance_scale,
     hiar_sde_corrupt_clean_latents,

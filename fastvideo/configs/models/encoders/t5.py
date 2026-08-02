@@ -67,8 +67,13 @@ class T5ArchConfig(TextEncoderArchConfig):
         if self.feed_forward_proj == "gated-gelu":
             self.dense_act_fn = "gelu_new"
 
-        self.tokenizer_kwargs.setdefault("add_special_tokens", True)
-        self.tokenizer_kwargs.setdefault("return_attention_mask", True)
+        self.tokenizer_kwargs = {
+            "truncation": True,
+            "max_length": self.text_len,
+            "add_special_tokens": True,
+            "return_attention_mask": True,
+            "return_tensors": "pt",
+        }
         self.hidden_size = self.d_model
 
 

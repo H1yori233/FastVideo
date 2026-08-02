@@ -19,11 +19,11 @@ from fastvideo.configs.pipelines.matrixgame35 import (
     matrixgame35_distilled_profile_settings,
     resolve_matrixgame35_hiar_scales,
 )
-from fastvideo.pipelines.basic.matrixgame35.distilled_standard_memory import (
+from fastvideo.pipelines.basic.matrixgame35.distilled_memory import (
     MatrixGame35DynamicContextEntry,
     MatrixGame35DynamicContextPool,
 )
-from fastvideo.pipelines.basic.matrixgame35.distilled_standard_profiles import (
+from fastvideo.pipelines.basic.matrixgame35.distilled_profiles import (
     distilled_hiar_noise_seed,
     hiar_sde_corrupt_clean_latents,
     trim_distilled_rolling_latents,

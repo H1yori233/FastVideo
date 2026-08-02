@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Released online memory and dynamic visual context for distilled STANDARD."""
+"""Released online memory and dynamic visual context for distilled profiles."""
 
 from __future__ import annotations
 

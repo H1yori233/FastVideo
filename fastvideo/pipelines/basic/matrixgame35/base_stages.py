@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stages for Matrix-Game 3.5 Base STANDARD rollout."""
+"""Stages for Matrix-Game 3.5 Base rollout."""
 
 from __future__ import annotations
 

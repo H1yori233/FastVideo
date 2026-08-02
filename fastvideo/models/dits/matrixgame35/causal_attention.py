@@ -6,10 +6,10 @@ from typing import TypedDict
 
 import torch
 
-from fastvideo.models.dits._matrixgame35_prope import (
+from fastvideo.models.dits.matrixgame35.prope import (
     prope_dot_product_attention_by_frame_indices,
 )
-from fastvideo.models.dits._matrixgame35_rope import apply_matrixgame35_rope
+from fastvideo.models.dits.matrixgame35.rope import apply_matrixgame35_rope
 
 
 class MatrixGame35CausalKVCache(TypedDict):

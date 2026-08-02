@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 import torch
 
-from fastvideo.pipelines.basic.matrixgame35.conditioning import (
+from fastvideo.models.dits.matrixgame35.conditioning import (
     build_mosaic_cross_attention_keep_mask, )
 
 

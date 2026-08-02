@@ -15,13 +15,9 @@ from fastvideo.configs.pipelines.matrixgame35 import (
     MatrixGame35BaseThirdPersonPipelineConfig,
     MatrixGame35DistilledFirstPersonPipelineConfig,
 )
-from fastvideo.pipelines.basic.matrixgame35.base_first_person_pipeline import (
+from fastvideo.pipelines.basic.matrixgame35 import (
     MatrixGame35BaseFirstPersonPipeline,
-)
-from fastvideo.pipelines.basic.matrixgame35.base_third_person_pipeline import (
     MatrixGame35BaseThirdPersonPipeline,
-)
-from fastvideo.pipelines.basic.matrixgame35.distilled_standard_pipeline import (
     MatrixGame35DistilledFirstPersonPipeline,
 )
 from fastvideo.registry import get_default_preset, get_model_info, get_pipeline_config_cls_from_name

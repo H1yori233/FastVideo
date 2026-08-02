@@ -28,18 +28,18 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.visual_embedding import PatchEmbed
-from fastvideo.models.dits._matrixgame35_causal import (
+from fastvideo.models.dits.matrixgame35.causal_attention import (
     MatrixGame35CausalKVCache,
     init_matrixgame35_causal_kv_caches,
     matrixgame35_causal_kv_attention,
 )
-from fastvideo.models.dits._matrixgame35_conditioning import (
+from fastvideo.models.dits.matrixgame35.conditioning import (
     build_mosaic_cross_attention_keep_mask,
     build_subject_ref_memory_tokens,
     prepend_subject_ref_prope_camera_info,
 )
-from fastvideo.models.dits._matrixgame35_prope import prope_dot_product_attention
-from fastvideo.models.dits._matrixgame35_rope import (
+from fastvideo.models.dits.matrixgame35.prope import prope_dot_product_attention
+from fastvideo.models.dits.matrixgame35.rope import (
     apply_matrixgame35_rope,
     build_matrixgame35_rope_frequencies,
     matrixgame35_rope_tables,
@@ -1129,6 +1129,3 @@ class MatrixGame35Transformer3DModel(BaseDiT):
         )
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         return hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
-
-
-EntryClass = MatrixGame35Transformer3DModel

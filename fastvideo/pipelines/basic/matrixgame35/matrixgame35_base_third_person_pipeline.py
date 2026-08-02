@@ -3,9 +3,9 @@
 
 from fastvideo.configs.pipelines.matrixgame35 import MatrixGame35BaseThirdPersonPipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines.basic.matrixgame35.base_first_person_pipeline import (
+from fastvideo.pipelines.basic.matrixgame35.matrixgame35_base_first_person_pipeline import (
     MatrixGame35BaseFirstPersonPipeline, )
-from fastvideo.pipelines.basic.matrixgame35.base_third_person_stages import (
+from fastvideo.pipelines.basic.matrixgame35.subject_reference_stage import (
     MatrixGame35BaseThirdPersonInputValidationStage,
     MatrixGame35BaseThirdPersonSubjectReferenceStage,
 )

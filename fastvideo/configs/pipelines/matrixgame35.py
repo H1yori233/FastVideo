@@ -2,7 +2,7 @@
 """Shared component and pipeline configs for Matrix-Game 3.5."""
 
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import html
 import math
 import re
@@ -16,13 +16,11 @@ from fastvideo.configs.models.dits.matrixgame35 import (
     MatrixGame35WanVideoConfig,
 )
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
-from fastvideo.configs.models.encoders.t5 import T5ArchConfig
+from fastvideo.configs.models.encoders.matrixgame35 import MatrixGame35T5ArchConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.dreamx_world import (
-    make_dreamx_world_5b_cam_text_encoder_config,
-    make_dreamx_world_5b_cam_vae_config,
-)
+    make_dreamx_world_5b_cam_vae_config, )
 from fastvideo.configs.pipelines.wan import t5_postprocess_text
 
 
@@ -38,16 +36,23 @@ def make_matrixgame35_vae_config() -> WanVAEConfig:
 def make_matrixgame35_text_encoder_config() -> T5Config:
     """Return the UMT5-XXL config used by the official Matrix-Game runtime."""
 
-    config = make_dreamx_world_5b_cam_text_encoder_config()
-    if not isinstance(config.arch_config, T5ArchConfig):
-        raise TypeError("Matrix-Game 3.5 requires the shared DreamX UMT5 T5ArchConfig.")
-    config.arch_config = replace(
-        config.arch_config,
-        dropout_rate=0.1,
-        feed_forward_proj="gated-gelu",
+    return T5Config(
+        arch_config=MatrixGame35T5ArchConfig(
+            vocab_size=256384,
+            d_model=4096,
+            d_kv=64,
+            d_ff=10240,
+            num_layers=24,
+            num_decoder_layers=None,
+            num_heads=64,
+            relative_attention_num_buckets=32,
+            dropout_rate=0.1,
+            text_len=512,
+            feed_forward_proj="gated-gelu",
+            is_encoder_decoder=False,
+        ),
+        prefix="umt5",
     )
-    config.arch_config.tokenizer_kwargs["padding"] = "max_length"
-    return config
 
 
 def matrixgame35_preprocess_text(prompt: str) -> str:
