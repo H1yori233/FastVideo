@@ -20,7 +20,7 @@ from fastvideo.pipelines.stages import ConditioningStage
 
 
 class MatrixGame35DistilledFirstPersonPipeline(LoRAPipeline, ComposedPipelineBase):
-    """Released distilled profiles, intentionally not registry-activated yet."""
+    """Released Distilled first-person pipeline with selectable runtime profiles."""
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer"]
     pipeline_config_cls = MatrixGame35DistilledFirstPersonPipelineConfig

@@ -1,7 +1,4 @@
-"""Matrix-Game 3.5 pipeline components.
-
-The production pipeline is activated only after component parity is complete.
-"""
+"""Matrix-Game 3.5 pipelines and shared components."""
 
 from fastvideo.pipelines.basic.matrixgame35.camera import (
     MatrixGame35CameraTrajectory,
@@ -25,8 +22,14 @@ from fastvideo.pipelines.basic.matrixgame35.schedule import (
     distilled_noise_seeds,
     x0_renoise_transition,
 )
+from fastvideo.pipelines.basic.matrixgame35.base_first_person_pipeline import MatrixGame35BaseFirstPersonPipeline
+from fastvideo.pipelines.basic.matrixgame35.base_third_person_pipeline import MatrixGame35BaseThirdPersonPipeline
+from fastvideo.pipelines.basic.matrixgame35.distilled_standard_pipeline import MatrixGame35DistilledFirstPersonPipeline
 
 __all__ = [
+    "MatrixGame35BaseFirstPersonPipeline",
+    "MatrixGame35BaseThirdPersonPipeline",
+    "MatrixGame35DistilledFirstPersonPipeline",
     "MatrixGame35CameraTrajectory",
     "build_prope_viewmats",
     "gather_latent_subframes",

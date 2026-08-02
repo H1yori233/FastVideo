@@ -19,7 +19,7 @@ from fastvideo.pipelines.stages import ConditioningStage
 
 
 class MatrixGame35BaseFirstPersonPipeline(LoRAPipeline, ComposedPipelineBase):
-    """Released Base first-person STANDARD pipeline, without public registry activation."""
+    """Released Base first-person STANDARD pipeline."""
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer"]
     pipeline_config_cls = MatrixGame35BaseFirstPersonPipelineConfig

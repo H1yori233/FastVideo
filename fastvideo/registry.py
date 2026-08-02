@@ -40,6 +40,11 @@ from fastvideo.configs.pipelines.flux_2 import (
 )
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
+from fastvideo.configs.pipelines.matrixgame35 import (
+    MatrixGame35BaseFirstPersonPipelineConfig,
+    MatrixGame35BaseThirdPersonPipelineConfig,
+    MatrixGame35DistilledFirstPersonPipelineConfig,
+)
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
     TurboDiffusionT2V_14B_Config,
@@ -782,6 +787,48 @@ def _register_configs() -> None:
         model_family="matrixgame",
         default_preset="matrixgame2_i2v",
     )
+    # Matrix-Game 3.5 (camera-conditioned I2V). Register before 3.0 because
+    # legacy 3.0 aliases use the broad "matrixgame3" token.
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MatrixGame35BaseFirstPersonPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=["FastVideo/Matrix-Game-3.5-Base-First-Person-Diffusers"],
+        model_detectors=[
+            lambda path: "matrixgame35basefirstpersonpipeline" in path.lower() or "matrix-game-3.5-base-first-person" in
+            path.lower(),
+        ],
+        model_family="matrixgame35",
+        default_preset="matrixgame35_base_first_person",
+        pipeline_cls_name="MatrixGame35BaseFirstPersonPipeline",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MatrixGame35BaseThirdPersonPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=["FastVideo/Matrix-Game-3.5-Base-Third-Person-Diffusers"],
+        model_detectors=[
+            lambda path: "matrixgame35basethirdpersonpipeline" in path.lower() or "matrix-game-3.5-base-third-person" in
+            path.lower(),
+        ],
+        model_family="matrixgame35",
+        default_preset="matrixgame35_base_third_person",
+        pipeline_cls_name="MatrixGame35BaseThirdPersonPipeline",
+    )
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=MatrixGame35DistilledFirstPersonPipelineConfig,
+        workload_types=(WorkloadType.I2V, ),
+        hf_model_paths=["FastVideo/Matrix-Game-3.5-Distilled-First-Person-Diffusers"],
+        model_detectors=[
+            lambda path: "matrixgame35distilledfirstpersonpipeline" in path.lower() or
+            "matrix-game-3.5-distilled-first-person" in path.lower(),
+        ],
+        model_family="matrixgame35",
+        default_preset="matrixgame35_distilled_first_person",
+        pipeline_cls_name="MatrixGame35DistilledFirstPersonPipeline",
+    )
+
     # MatrixGame 3.0 (I2V)
     register_configs(
         sampling_param_cls=MatrixGame3SamplingParam,
@@ -791,11 +838,13 @@ def _register_configs() -> None:
             "FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers",
         ],
         model_detectors=[
-            lambda path: any(token in path.lower() for token in (
-                "matrix-game-3",
-                "matrixgame3",
-                "matrix-game-3.0",
-            )),
+            lambda path:
+            ("matrix-game-3.5" not in path.lower() and "matrixgame35" not in path.lower() and any(token in path.lower()
+                                                                                                  for token in (
+                                                                                                      "matrix-game-3",
+                                                                                                      "matrixgame3",
+                                                                                                      "matrix-game-3.0",
+                                                                                                  ))),
         ],
         model_family="matrixgame",
         default_preset="matrixgame3_i2v",
@@ -1279,6 +1328,8 @@ def _register_presets() -> None:
         ALL_PRESETS as MATRIXGAME2_PRESETS, )
     from fastvideo.pipelines.basic.matrixgame3.presets import (
         ALL_PRESETS as MATRIXGAME3_PRESETS, )
+    from fastvideo.pipelines.basic.matrixgame35.presets import (
+        ALL_PRESETS as MATRIXGAME35_PRESETS, )
     from fastvideo.pipelines.basic.sd35.presets import (
         ALL_PRESETS as SD35_PRESETS, )
     from fastvideo.pipelines.basic.stable_audio.presets import (
@@ -1309,6 +1360,7 @@ def _register_presets() -> None:
         LTX2_PRESETS,
         MATRIXGAME2_PRESETS,
         MATRIXGAME3_PRESETS,
+        MATRIXGAME35_PRESETS,
         SD35_PRESETS,
         STABLE_AUDIO_PRESETS,
         TURBODIFFUSION_PRESETS,

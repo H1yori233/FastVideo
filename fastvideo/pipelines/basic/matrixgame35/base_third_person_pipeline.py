@@ -12,7 +12,7 @@ from fastvideo.pipelines.basic.matrixgame35.base_third_person_stages import (
 
 
 class MatrixGame35BaseThirdPersonPipeline(MatrixGame35BaseFirstPersonPipeline):
-    """Released Base third-person STANDARD pipeline, without public registry activation."""
+    """Released Base third-person STANDARD pipeline."""
 
     pipeline_config_cls = MatrixGame35BaseThirdPersonPipelineConfig
     input_validation_stage_cls = MatrixGame35BaseThirdPersonInputValidationStage
