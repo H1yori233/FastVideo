@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Per-method GPU smoke test: ``WanCausalModel`` + ``CausalConsistencyDistillationMethod``.
+"""Per-method GPU smoke test: ``WanCausalModel`` + ``ConsistencyDistillationMethod``.
 
 Mirrors ``test_wan_causal_dfsft.py``. Causal consistency distillation
 bootstraps a consistency MSE between the student's ``x0`` at ``t`` and an EMA
@@ -21,8 +21,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from fastvideo.train.methods.consistency_model.causal_cd import (
-    CausalConsistencyDistillationMethod, )
+from fastvideo.train.methods.consistency_model import ConsistencyDistillationMethod
 from fastvideo.train.models.wan import WanCausalModel
 from fastvideo.train.utils.config import load_run_config
 
@@ -71,21 +70,15 @@ def test_wan_causal_cd_single_train_step(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     teacher.transformer = teacher.transformer.to(device=device, dtype=dtype)
 
-    ema = WanCausalModel(
-        init_from=cfg.models["ema"]["init_from"],
-        training_config=cfg.training,
-        trainable=False,
-    )
-    ema.transformer = ema.transformer.to(device=device, dtype=dtype)
-
-    method = CausalConsistencyDistillationMethod(
+    method = ConsistencyDistillationMethod(
         cfg=cfg,
         role_models={
             "student": student,
             "teacher": teacher,
-            "ema": ema
         },
     )
+    ema = method.get_ema_target_model()
+    ema.transformer = ema.transformer.to(device=device, dtype=dtype)
     method.on_train_start()
 
     batch = _build_synthetic_batch(device, dtype)
@@ -129,10 +122,10 @@ def test_wan_causal_cd_single_train_step(monkeypatch: pytest.MonkeyPatch) -> Non
     # optimizer step at lr=2e-6 would be sub-ULP in bf16).
     with torch.no_grad():
         student_param.add_(1.0)
-    before = _local(ema_param).detach().float().clone()
+    before = method._target_ema.shadow[next(iter(method._target_ema.shadow))].clone()
     method._update_ema()
-    after = _local(ema_param).detach().float()
+    after = method._target_ema.shadow[next(iter(method._target_ema.shadow))]
     assert not torch.equal(before, after), ("EMA weights did not move after _update_ema")
     # EMA = decay*ema + (1-decay)*student moves ~ (1-decay) of the gap.
     expected = before + (1.0 - method._ema_decay) * (_local(student_param).detach().float() - before)
-    assert torch.allclose(after, expected, atol=1e-2), ("EMA update did not follow the expected lerp")
+    assert torch.allclose(after, expected.cpu(), atol=1e-2), ("EMA update did not follow the expected lerp")

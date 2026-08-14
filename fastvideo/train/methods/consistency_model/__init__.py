@@ -5,18 +5,26 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from fastvideo.train.methods.consistency_model.causal_cd import (
-        CausalConsistencyDistillationMethod, )
+    from fastvideo.train.methods.consistency_model.consistency_distillation import (
+        ConsistencyDistillationMethod,
+        ConsistencyDistillationValidationCallback,
+    )
 
 __all__ = [
-    "CausalConsistencyDistillationMethod",
+    "ConsistencyDistillationMethod",
+    "ConsistencyDistillationValidationCallback",
 ]
 
 
 def __getattr__(name: str) -> object:
-    if name == "CausalConsistencyDistillationMethod":
-        from fastvideo.train.methods.consistency_model.causal_cd import (
-            CausalConsistencyDistillationMethod, )
+    if name == "ConsistencyDistillationMethod":
+        from fastvideo.train.methods.consistency_model.consistency_distillation import (
+            ConsistencyDistillationMethod, )
 
-        return CausalConsistencyDistillationMethod
+        return ConsistencyDistillationMethod
+    if name == "ConsistencyDistillationValidationCallback":
+        from fastvideo.train.methods.consistency_model.consistency_distillation import (
+            ConsistencyDistillationValidationCallback, )
+
+        return ConsistencyDistillationValidationCallback
     raise AttributeError(name)

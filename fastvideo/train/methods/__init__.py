@@ -10,7 +10,7 @@ __all__ = [
     "SelfForcingMethod",
     "DiffusionForcingSFTMethod",
     "TeacherForcingSFTMethod",
-    "CausalConsistencyDistillationMethod",
+    "ConsistencyDistillationMethod",
 ]
 
 
@@ -33,8 +33,8 @@ def __getattr__(name: str) -> object:
     if name == "TeacherForcingSFTMethod":
         from fastvideo.train.methods.fine_tuning.tfsft import TeacherForcingSFTMethod
         return TeacherForcingSFTMethod
-    if name == "CausalConsistencyDistillationMethod":
-        from fastvideo.train.methods.consistency_model.causal_cd import (
-            CausalConsistencyDistillationMethod, )
-        return CausalConsistencyDistillationMethod
+    if name == "ConsistencyDistillationMethod":
+        from fastvideo.train.methods.consistency_model.consistency_distillation import (
+            ConsistencyDistillationMethod, )
+        return ConsistencyDistillationMethod
     raise AttributeError(name)

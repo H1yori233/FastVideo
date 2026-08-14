@@ -15,6 +15,7 @@ import pytest
 import torch
 
 from fastvideo.train.callbacks.ema import EMACallback
+from fastvideo.training.training_utils import EMA_FSDP
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -188,6 +189,31 @@ class TestEmaContext:
             assert torch.allclose(t.weight, torch.full((2, 4), 1.0))
 
         assert torch.allclose(transformer.weight, torch.full((2, 4), 9.0))
+
+
+class TestCopyToModel:
+
+    def test_copies_shadow_into_frozen_destination_with_name_mapping(self) -> None:
+        source = torch.nn.Module()
+        source.add_module("_checkpoint_wrapped_module", _tiny_transformer(fill=2.0))
+        ema = EMA_FSDP(source, decay=0.5, mode="local_shard")
+        with torch.no_grad():
+            source._checkpoint_wrapped_module.weight.fill_(4.0)
+        ema.update(source)
+
+        destination = _tiny_transformer(fill=9.0).requires_grad_(False)
+        ema.copy_to_model(
+            destination,
+            name_mapper=lambda name: name.replace("_checkpoint_wrapped_module.", ""),
+        )
+
+        assert torch.allclose(destination.weight, torch.full((2, 4), 3.0))
+
+    def test_strict_copy_rejects_missing_destination_parameter(self) -> None:
+        ema = EMA_FSDP(_tiny_transformer(fill=1.0), mode="local_shard")
+
+        with pytest.raises(KeyError, match="missing parameters"):
+            ema.copy_to_model(torch.nn.Identity())
 
 
 # ---------------------------------------------------------------------------

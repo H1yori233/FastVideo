@@ -1,19 +1,15 @@
-# Causal Consistency Distillation: Wan 2.1 T2V 1.3B Causal
+# Consistency Distillation: Wan 2.1 T2V 1.3B (bidirectional)
 #
-# ODE-data-free distillation. A frozen teacher takes a single CFG Euler step;
-# the student matches an EMA copy of itself at the next timestep, all under
-# clean-history teacher forcing.
-#
-# All two roles initialize from the SAME checkpoint (the teacher-forcing
-# AR-diffusion model). Point init_from at that checkpoint for a real run.
+# ODE-data-free distillation. A frozen teacher takes one CFG Euler step;
+# the student matches an EMA copy of itself at the next timestep.
 
 models:
   student:
-    _target_: fastvideo.train.models.wan.WanCausalModel
+    _target_: fastvideo.train.models.wan.WanModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: true
   teacher:
-    _target_: fastvideo.train.models.wan.WanCausalModel
+    _target_: fastvideo.train.models.wan.WanModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: false
 
@@ -37,10 +33,10 @@ training:
     train_batch_size: 1
     training_cfg_rate: 0.0
     seed: 1000
-    num_latent_t: 18
+    num_latent_t: 20
     num_height: 448
     num_width: 832
-    num_frames: 69
+    num_frames: 77
 
   optimizer:
     learning_rate: 2.0e-6
@@ -54,13 +50,13 @@ training:
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: outputs/wan2.1_causal_cd
+    output_dir: outputs/wan2.1_cd
     training_state_checkpointing_steps: 1000
     checkpoints_total_limit: 3
 
   tracker:
     project_name: distillation_wan_r
-    run_name: wan2.1_causal_cd_shift5
+    run_name: wan2.1_cd_shift5
 
   model:
     enable_gradient_checkpointing_type: full

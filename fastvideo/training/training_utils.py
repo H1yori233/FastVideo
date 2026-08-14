@@ -1675,6 +1675,50 @@ class EMA_FSDP:
                 p = name_to_param[n]
                 p.data.copy_(w.to(dtype=p.dtype, device=p.device))
 
+    @torch.no_grad()
+    def copy_to_model(
+        self,
+        module: torch.nn.Module,
+        *,
+        name_mapper: Callable[[str], str] | None = None,
+        strict: bool = True,
+    ) -> None:
+        """Copy local EMA shards into another identically-sharded module.
+
+        Unlike :meth:`apply_to_model`, the destination may be frozen.  This is
+        useful for consistency-distillation targets that need a separately
+        callable EMA network while the authoritative shadow remains in CPU
+        float32 storage.
+        """
+        if self.mode != "local_shard":
+            raise RuntimeError("copy_to_model is only supported for mode='local_shard'")
+
+        map_name = name_mapper or (lambda name: name)
+        target_params: dict[str, torch.Tensor] = {}
+        for name, parameter in module.named_parameters():
+            mapped_name = map_name(name)
+            if mapped_name in target_params:
+                raise ValueError(f"Duplicate EMA destination parameter name after mapping: {mapped_name!r}")
+            target_params[mapped_name] = parameter
+
+        missing: list[str] = []
+        for source_name, ema_cpu in self.shadow.items():
+            mapped_name = map_name(source_name)
+            parameter = target_params.get(mapped_name)
+            if parameter is None:
+                missing.append(mapped_name)
+                continue
+            local_parameter = self._to_local_tensor(parameter.detach())
+            if tuple(local_parameter.shape) != tuple(ema_cpu.shape):
+                raise ValueError(f"EMA shard shape mismatch for {mapped_name!r}: "
+                                 f"shadow={tuple(ema_cpu.shape)}, target={tuple(local_parameter.shape)}")
+            local_parameter.copy_(ema_cpu.to(device=local_parameter.device, dtype=local_parameter.dtype))
+
+        if strict and missing:
+            preview = ", ".join(repr(name) for name in missing[:5])
+            suffix = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
+            raise KeyError(f"EMA destination is missing parameters: {preview}{suffix}")
+
     class _ApplyEMACtx:
 
         def __init__(self, ema: "EMA_FSDP", module):

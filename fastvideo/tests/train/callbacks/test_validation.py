@@ -14,6 +14,7 @@ distributed init and is exercised by Phase 2/3 tests.
 """
 from __future__ import annotations
 
+import contextlib
 from types import SimpleNamespace
 
 import numpy as np
@@ -511,6 +512,27 @@ class TestFindEmaCallback:
 
         found = cb._find_ema_callback()
         assert found is ema
+
+
+def test_run_validation_uses_student_transformer(monkeypatch: pytest.MonkeyPatch) -> None:
+    cb = _make_callback()
+    student_transformer = torch.nn.Linear(1, 1)
+    method = SimpleNamespace(
+        student=SimpleNamespace(transformer=student_transformer),
+    )
+    seen: list[torch.nn.Module] = []
+
+    monkeypatch.setattr(
+        cb,
+        "_validation_memory_context",
+        lambda _method, *, validation_transformer: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(cb, "_attn_qat_infer_context", lambda _transformer: contextlib.nullcontext())
+    monkeypatch.setattr(cb, "_run_validation_inner", lambda _method, _step, transformer: seen.append(transformer))
+
+    cb._run_validation(method, step=100)  # type: ignore[arg-type]
+
+    assert seen == [student_transformer]
 
 
 # ---------------------------------------------------------------------------

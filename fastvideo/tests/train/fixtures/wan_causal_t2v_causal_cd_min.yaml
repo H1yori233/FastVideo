@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Minimum config to run a single training step of
-# CausalConsistencyDistillationMethod on WanCausalModel for the
+# ConsistencyDistillationMethod on WanCausalModel for the
 # per-method smoke test. Uses the real Wan 2.1 1.3B checkpoint for both
 # the trainable student and the frozen teacher (AR Euler-step target),
 # with tiny synthetic latents.
@@ -14,13 +14,9 @@ models:
     _target_: fastvideo.train.models.wan.WanCausalModel
     init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
     trainable: false
-  ema:
-    _target_: fastvideo.train.models.wan.WanCausalModel
-    init_from: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
-    trainable: false
 
 method:
-  _target_: fastvideo.train.methods.consistency_model.causal_cd.CausalConsistencyDistillationMethod
+  _target_: fastvideo.train.methods.consistency_model.ConsistencyDistillationMethod
   discrete_cd_N: 12
   guidance_scale: 3.0
   ema_decay: 0.95
