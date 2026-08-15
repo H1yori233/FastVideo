@@ -21,6 +21,7 @@ from fastvideo.train.utils.config import load_run_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _BIDIRECTIONAL_CONFIG = _REPO_ROOT / "examples/train/configs/consistency_model/wan/cd_t2v.yaml"
+_CAUSAL_CONFIG = _REPO_ROOT / "examples/train/configs/consistency_model/wan/causal_cd_t2v.yaml"
 
 
 class _ScaleTransformer(torch.nn.Module):
@@ -410,18 +411,41 @@ def test_ema_checkpoint_round_trip_restores_shadow_and_callable_target(
     state_wrapper = method.checkpoint_state()["consistency_distillation.ema"]
     with torch.no_grad():
         method._target_ema.shadow["scale"].fill_(1.75)
+    method._ema_target_dirty = True
     method._ema_update_count = 12
     state = state_wrapper.state_dict()
+    saved_model_state = {name: tensor.clone() for name, tensor in state["model"].items()}
+
+    assert "shadow" not in state
+    assert saved_model_state.keys() == {"scale"}
+    assert torch.allclose(saved_model_state["scale"], torch.tensor(1.75))
 
     with torch.no_grad():
         method._target_ema.shadow["scale"].zero_()
         method._ema_target_model.transformer.scale.fill_(9.0)
     method._ema_update_count = 0
-    state_wrapper.load_state_dict(state)
+    state_wrapper.load_state_dict({
+        "model": saved_model_state,
+        "update_count": state["update_count"],
+    })
 
     assert method._ema_update_count == 12
     assert torch.allclose(method._target_ema.shadow["scale"], torch.tensor(1.75))
     assert torch.allclose(method._ema_target_model.transformer.scale, torch.tensor(1.75))
+
+
+def test_ema_checkpoint_rejects_legacy_local_shard_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "fastvideo.train.methods.consistency_model.consistency_distillation.build_optimizer_and_scheduler",
+        _fake_optimizer_builder,
+    )
+    method = ConsistencyDistillationMethod(cfg=_config(), role_models=_role_models(_BidirectionalModel))
+    state_wrapper = method.checkpoint_state()["consistency_distillation.ema"]
+
+    with pytest.raises(ValueError, match="invalid legacy local-shard format"):
+        state_wrapper.load_state_dict({"shadow": {"scale": torch.tensor(1.0)}})
 
 
 @pytest.mark.parametrize(

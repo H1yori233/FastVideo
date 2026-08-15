@@ -4,7 +4,7 @@
 # the student matches an EMA copy of itself at the next timestep, all under
 # clean-history teacher forcing.
 #
-# All two roles initialize from the SAME checkpoint (the teacher-forcing
+# Both roles initialize from the SAME checkpoint (the teacher-forcing
 # AR-diffusion model). Point init_from at that checkpoint for a real run.
 
 models:
@@ -44,7 +44,7 @@ training:
 
   optimizer:
     learning_rate: 2.0e-6
-    betas: [0.9, 0.999]
+    betas: [0.0, 0.999]
     weight_decay: 0.01
     lr_scheduler: constant
     lr_warmup_steps: 0
@@ -59,7 +59,7 @@ training:
     checkpoints_total_limit: 3
 
   tracker:
-    project_name: distillation_wan_r
+    project_name: distillation_wan
     run_name: wan2.1_causal_cd_shift5
 
   model:
@@ -67,7 +67,18 @@ training:
 
 callbacks:
   grad_clip:
-    max_grad_norm: 1.0
+    max_grad_norm: 10.0
+  validation:
+    _target_: fastvideo.train.methods.consistency_model.ConsistencyDistillationValidationCallback
+    pipeline_target: fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline.WanCausalDMDPipeline
+    dataset_file: examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/validation_4.json
+    sampling_steps: [4]
+    # Actual shift=5 model timesteps corresponding to the nominal
+    # [1000, 750, 500, 250] consistency schedule. They are already warped;
+    # the validation pipeline must not warp them a second time.
+    sampling_timesteps: [1000, 937, 833, 625]
+    guidance_scale: 1.0
 
 pipeline:
   flow_shift: 5
+  warp_denoising_step: false

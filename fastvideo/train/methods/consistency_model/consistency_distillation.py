@@ -7,6 +7,11 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    set_model_state_dict,
+)
 
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (SelfForcingFlowMatchScheduler)
 from fastvideo.train.callbacks.validation import ValidationCallback
@@ -23,28 +28,72 @@ def _canonical_parameter_name(name: str) -> str:
 
 
 class _EMAState:
-    """DCP state for the authoritative CD target EMA shadow."""
+    """DCP state for the CD-owned EMA target.
+
+    ``EMA_FSDP.shadow`` contains plain CPU tensors for each rank's local
+    shards. Saving that dictionary directly makes DCP treat equal-named
+    shards as replicas and retain only one rank. Checkpoint the identically
+    sharded callable target model instead so DCP preserves DTensor metadata,
+    then rebuild the authoritative CPU shadow after load.
+    """
 
     def __init__(self, method: ConsistencyDistillationMethod) -> None:
         self._method = method
 
     def state_dict(self) -> dict[str, Any]:
+        self._method._sync_ema_target()
         return {
-            "shadow": self._method._target_ema.state_dict(),
+            "model": get_model_state_dict(self._method._ema_target_model.transformer),
             "update_count": torch.tensor(self._method._ema_update_count, dtype=torch.long),
         }
 
+    @torch.no_grad()
+    def _restore_shadow_from_model(self) -> None:
+        target_parameters: dict[str, torch.Tensor] = {}
+        for name, parameter in self._method._ema_target_model.transformer.named_parameters():
+            canonical_name = _canonical_parameter_name(name)
+            if canonical_name in target_parameters:
+                raise ValueError(f"Duplicate EMA target parameter name after mapping: {canonical_name!r}")
+            target_parameters[canonical_name] = parameter
+
+        missing: list[str] = []
+        for source_name, shadow in self._method._target_ema.shadow.items():
+            canonical_name = _canonical_parameter_name(source_name)
+            parameter = target_parameters.get(canonical_name)
+            if parameter is None:
+                missing.append(canonical_name)
+                continue
+            local_parameter = EMA_FSDP._to_local_tensor(parameter.detach())
+            if tuple(local_parameter.shape) != tuple(shadow.shape):
+                raise ValueError(f"EMA checkpoint shard shape mismatch for {canonical_name!r}: "
+                                 f"target={tuple(local_parameter.shape)}, shadow={tuple(shadow.shape)}")
+            shadow.copy_(local_parameter.float().cpu())
+
+        if missing:
+            preview = ", ".join(repr(name) for name in missing[:5])
+            suffix = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
+            raise KeyError(f"EMA checkpoint target is missing parameters: {preview}{suffix}")
+
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        shadow = state_dict.get("shadow", {})
-        if not isinstance(shadow, dict):
-            raise TypeError("Consistency EMA checkpoint shadow must be a mapping")
-        self._method._target_ema.load_state_dict(shadow)
+        if "model" not in state_dict:
+            if "shadow" in state_dict:
+                raise ValueError("This consistency EMA checkpoint uses the invalid legacy local-shard format and "
+                                 "cannot safely restore a distributed EMA target")
+            raise KeyError("Consistency EMA checkpoint is missing model state")
+        model_state = state_dict["model"]
+        if not isinstance(model_state, dict):
+            raise TypeError("Consistency EMA checkpoint model state must be a mapping")
+        set_model_state_dict(
+            self._method._ema_target_model.transformer,
+            model_state_dict=model_state,
+            options=StateDictOptions(strict=True),
+        )
+        self._restore_shadow_from_model()
         update_count = state_dict.get("update_count", 0)
         if torch.is_tensor(update_count):
             update_count = int(update_count.item())
         self._method._ema_update_count = int(update_count)
-        self._method._ema_target_dirty = True
-        self._method._sync_ema_target()
+        self._method._ema_target_dirty = False
 
 
 class ConsistencyDistillationMethod(TrainingMethod):
