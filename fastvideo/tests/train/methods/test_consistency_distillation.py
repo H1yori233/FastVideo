@@ -216,6 +216,47 @@ def _run_step(
     return method, role_models, loss_map
 
 
+def test_cd_reconstructs_x0_in_fp32_before_computing_loss(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "fastvideo.train.methods.consistency_model.consistency_distillation.build_optimizer_and_scheduler",
+        _fake_optimizer_builder,
+    )
+    method = ConsistencyDistillationMethod(cfg=_config(), role_models=_role_models(_BidirectionalModel))
+    method.cuda_generator = torch.Generator(device="cpu").manual_seed(7)
+    method._discrete_cd_n = 2
+    method._sf_scheduler = SimpleNamespace(
+        sigmas=torch.tensor([0.9375, 0.8333333], dtype=torch.float32),
+        timesteps=torch.tensor([937.5, 833.3333], dtype=torch.float32),
+    )
+
+    shape = (1, 1, 1, 1, 1)
+    student_flow = torch.full(shape, 7.96875, dtype=torch.bfloat16, requires_grad=True)
+    flows = iter([
+        torch.zeros(shape, dtype=torch.bfloat16),
+        torch.zeros(shape, dtype=torch.bfloat16),
+        student_flow,
+        torch.full(shape, 9.0, dtype=torch.bfloat16),
+    ])
+    monkeypatch.setattr(method, "_predict_flow", lambda *_args, **_kwargs: next(flows))
+    monkeypatch.setattr(
+        torch,
+        "randn",
+        lambda size, **kwargs: torch.full(size, -8.0, device=kwargs["device"], dtype=kwargs["dtype"]),
+    )
+
+    loss_map, _, _ = method.single_train_step(
+        {"latents": torch.full(shape, -8.0, dtype=torch.bfloat16)},
+        iteration=0,
+    )
+    loss = loss_map["total_loss"]
+    loss.backward()
+
+    assert loss.dtype == torch.float32
+    assert loss > 0
+    assert student_flow.grad is not None
+    assert torch.count_nonzero(student_flow.grad) == 1
+
+
 def test_bidirectional_cd_uses_batch_timesteps_and_standard_model_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

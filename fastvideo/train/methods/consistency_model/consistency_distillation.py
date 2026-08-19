@@ -285,7 +285,8 @@ class ConsistencyDistillationMethod(TrainingMethod):
                                           training_batch,
                                           conditional=True,
                                           clean_latents=clean_latents)
-        x0_t = latent_t - sigma_t * flow_student
+        # Reconstruct x0 in FP32 so BF16 cancellation cannot quantize small CD residuals to zero before the loss.
+        x0_t = latent_t.float() - sigma_t.float() * flow_student.float()
 
         training_batch.timesteps = model_t_next
         with torch.no_grad():
@@ -299,9 +300,9 @@ class ConsistencyDistillationMethod(TrainingMethod):
                                           training_batch,
                                           conditional=True,
                                           clean_latents=clean_latents)
-            x0_t_next = latent_t_next - sigma_t_next * flow_ema
+            x0_t_next = latent_t_next.float() - sigma_t_next.float() * flow_ema.float()
 
-        loss = F.mse_loss(x0_t.float(), x0_t_next.float())
+        loss = F.mse_loss(x0_t, x0_t_next)
         loss_map = {"total_loss": loss, self.loss_name: loss}
         attn_metadata = (training_batch.attn_metadata_vsa if self._attn_kind == "vsa" else training_batch.attn_metadata)
         outputs: dict[str, Any] = {"_fv_backward": (model_t, attn_metadata)}
