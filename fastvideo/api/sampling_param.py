@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +28,11 @@ class SamplingParam:
     pil_image: Any | None = None
     last_image: Any | None = None
     references: list[Any] | None = None
+    flux3_boxes: list[dict[str, Any]] | None = None
+    flux3_alpha: float = 6.93
+    flux3_auto_size: bool = False
+    flux3_upsample_prompt: bool = True
+    flux3_pup_max_new_tokens: int = 3584
 
     # Video inputs
     video_path: str | None = None
@@ -405,6 +411,26 @@ class SamplingParam:
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
         )
+        parser.add_argument("--flux3-boxes",
+                            type=json.loads,
+                            default=None,
+                            help="FLUX.3 layout boxes as a JSON list with normalized coordinates")
+        parser.add_argument("--flux3-alpha",
+                            type=float,
+                            default=SamplingParam.flux3_alpha,
+                            help="FLUX.3 flow-map schedule alpha")
+        parser.add_argument("--flux3-auto-size",
+                            action=StoreBoolean,
+                            default=SamplingParam.flux3_auto_size,
+                            help="Derive FLUX.3 output size from the first reference, overriding height/width")
+        parser.add_argument("--flux3-upsample-prompt",
+                            action=StoreBoolean,
+                            default=SamplingParam.flux3_upsample_prompt,
+                            help="Expand FLUX.3 prompts with the native prompt upsampler")
+        parser.add_argument("--flux3-pup-max-new-tokens",
+                            type=int,
+                            default=SamplingParam.flux3_pup_max_new_tokens,
+                            help="Maximum new tokens from the FLUX.3 prompt upsampler")
         parser.add_argument(
             "--refine-from",
             type=str,

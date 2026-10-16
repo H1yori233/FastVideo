@@ -3,6 +3,7 @@ from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
 from fastvideo.configs.models.dits.dreamx_world import DreamXWorldARConfig, DreamXWorldConfig
 from fastvideo.configs.models.dits.flux import FluxDiTConfig
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
+from fastvideo.configs.models.dits.flux3 import Flux3ArchConfig, Flux3Config
 from fastvideo.configs.models.dits.glm_image import GlmImageDiTConfig
 from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
 from fastvideo.configs.models.dits.hunyuanvideo import HunyuanVideoConfig
@@ -25,5 +26,6 @@ __all__ = [
     "DreamXWorldARConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "FluxDiTConfig", "Flux2Config",
     "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig", "Kandinsky5VideoConfig", "MagiHumanVideoConfig",
     "StableAudioConfig", "GlmImageDiTConfig", "LingBotWorld2CausalFastVideoConfig", "LingBotVideoConfig",
-    "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig"
+    "MiniMaxH3Config", "ZImageDiTConfig", "MMAudioArchConfig", "MMAudioTransformerConfig", "Flux3ArchConfig",
+    "Flux3Config"
 ]

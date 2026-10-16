@@ -38,6 +38,7 @@ from fastvideo.configs.pipelines.flux_2 import (
     Flux2KleinPipelineConfig,
     Flux2PipelineConfig,
 )
+from fastvideo.configs.pipelines.flux3 import Flux3PipelineConfig
 from fastvideo.configs.pipelines.matrixgame2 import MatrixGame2I2V480PConfig
 from fastvideo.configs.pipelines.matrixgame3 import MatrixGame3I2V720PConfig
 from fastvideo.configs.pipelines.minimax_h3 import MiniMaxH3PipelineConfig
@@ -360,6 +361,20 @@ def _register_configs() -> None:
         ],
         model_family="stable_audio",
         default_preset="stable_audio_open_small",
+    )
+
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=Flux3PipelineConfig,
+        workload_types=(WorkloadType.T2I, WorkloadType.I2I),
+        hf_model_paths=["black-forest-labs/flux-3-image-klein"],
+        model_detectors=[
+            lambda path: "base" not in path.lower() and any(name in path.lower()
+                                                            for name in ("flux3", "flux-3-image-klein", "flux.3"))
+        ],
+        model_family="flux3",
+        default_preset="flux3_klein",
+        pipeline_cls_name="Flux3Pipeline",
     )
 
     def _is_flux2_klein(path: str) -> bool:
@@ -1180,11 +1195,14 @@ def _register_presets() -> None:
         ALL_PRESETS as ZIMAGE_PRESETS, )
     from fastvideo.pipelines.basic.flux_2.presets import (
         ALL_PRESETS as FLUX2_PRESETS, )
+    from fastvideo.pipelines.basic.flux3.presets import (
+        ALL_PRESETS as FLUX3_PRESETS, )
 
     all_preset_groups = (
         COSMOS_PRESETS,
         DREAMX_WORLD_PRESETS,
         FLUX2_PRESETS,
+        FLUX3_PRESETS,
         GAMECRAFT_PRESETS,
         GEN3C_PRESETS,
         HUNYUAN_PRESETS,

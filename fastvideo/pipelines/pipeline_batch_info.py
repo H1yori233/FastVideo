@@ -80,6 +80,11 @@ class ForwardBatch:
     pil_image: torch.Tensor | PIL.Image.Image | None = None
     last_image: torch.Tensor | PIL.Image.Image | None = None
     references: list[Any] | None = None
+    flux3_boxes: list[dict[str, Any]] | None = None
+    flux3_alpha: float = 6.93
+    flux3_auto_size: bool = False
+    flux3_upsample_prompt: bool = True
+    flux3_pup_max_new_tokens: int = 3584
     preprocessed_image: torch.Tensor | None = None
     # Text inputs
     prompt: str | list[str] | None = None
